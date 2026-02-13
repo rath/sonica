@@ -41,6 +41,15 @@ sonica track.flac -t kaleidoscope --width 3840 --height 2160 --fps 60 --crf 12
 # Hardware encoding on macOS
 sonica audio.wav --codec h264_videotoolbox --pix-fmt nv12
 
+# Korean title with Google Noto Sans KR
+sonica audio.wav --title "안녕하세요, SONICA" --font-url "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/SubsetOTF/KR/NotoSansKR-Regular.otf"
+
+# 실제 동작되는 Noto Sans KR TTF/OTF URL 예시
+sonica audio.wav --title "안녕하세요" --font-url "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/SubsetOTF/KR/NotoSansKR-Regular.otf"
+
+# 로컬 폰트 파일 경로 예시 (macOS)
+sonica audio.wav --title "안녕하세요" --font "/System/Library/Fonts/Supplemental/NotoSansCJK-Regular.ttc"
+
 # List available templates
 sonica --list-templates
 ```
@@ -118,6 +127,8 @@ Options:
       --effects <LIST>       Post-processing effects, comma-separated (use "none" to disable)
       --smoothing <F>        Audio smoothing factor, 0.0-1.0 [default: 0.85]
       --title <TEXT>         Title text overlay (bottom center)
+      --font <PATH>          Font file for title/time overlay (TTF/OTF)
+      --font-url <URL>       Font URL for title/time overlay (TTF/OTF or Google Fonts URL)
       --show-time            Show elapsed time overlay (bottom right)
       --param <KEY=VALUE>    Template parameter overrides, comma-separated
       --config <PATH>        Config file path [default: ./sonica.toml]
@@ -157,12 +168,17 @@ height = 720
 fps = 60
 crf = 15
 codec = "libx264"
+pix_fmt = "yuv420p"
+font = "/path/to/NotoSansKR-Regular.otf"
+font_url = "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/SubsetOTF/KR/NotoSansKR-Regular.otf"
 
 [audio]
 smoothing = 0.9
 
 effects = ["bloom", "vignette"]
 ```
+
+For Korean text, use a font that includes CJK glyphs (for example `NotoSansKR-Regular.otf` from Google Fonts) via `--font`, `--font-url`, or `font` / `font_url` in the config.
 
 ## Supported Audio Formats
 

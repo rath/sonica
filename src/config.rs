@@ -23,6 +23,8 @@ pub struct OutputConfig {
     pub crf: u32,
     #[serde(default = "default_codec")]
     pub codec: String,
+    pub font: Option<PathBuf>,
+    pub font_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -39,6 +41,8 @@ impl Default for OutputConfig {
             fps: default_fps(),
             crf: default_crf(),
             codec: default_codec(),
+            font: None,
+            font_url: None,
         }
     }
 }

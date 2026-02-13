@@ -43,6 +43,14 @@ pub struct Cli {
     #[arg(long)]
     pub title: Option<String>,
 
+    /// Font file for title/time overlay (TTF/OTF path)
+    #[arg(long)]
+    pub font: Option<PathBuf>,
+
+    /// Font URL for title/time overlay (direct TTF/OTF URL or Google Fonts URL)
+    #[arg(long)]
+    pub font_url: Option<String>,
+
     /// Show elapsed time overlay
     #[arg(long)]
     pub show_time: bool,

@@ -17,7 +17,7 @@ use render::gpu::GpuContext;
 use render::pipeline::{ComputePipelineWrapper, FrameUniforms, RenderPipeline};
 use render::frame::{FrameRenderer, TEXTURE_FORMAT};
 use render::postprocess::PostProcessChain;
-use render::text::TextOverlay;
+use render::text::{load_font_from_url, TextOverlay};
 use encode::ffmpeg::FfmpegEncoder;
 use audio::features::SmoothedFrame;
 use templates::loader;
@@ -54,6 +54,12 @@ fn main() -> Result<()> {
             if cli.smoothing == 0.85 { cli.smoothing = cfg.audio.smoothing; }
             if cli.effects.is_empty() && !cfg.effects.is_empty() {
                 cli.effects = cfg.effects;
+            }
+            if cli.font.is_none() {
+                cli.font = cfg.output.font;
+            }
+            if cli.font_url.is_none() {
+                cli.font_url = cfg.output.font_url;
             }
         } else {
             log::warn!("Failed to load config from {}", path.display());
@@ -237,9 +243,25 @@ fn main() -> Result<()> {
     )?;
 
     // 8. Text overlay
+    let font_bytes = if let Some(ref font_url) = cli.font_url {
+        match load_font_from_url(font_url) {
+            Ok(bytes) => Some(bytes),
+            Err(err) => {
+                log::warn!("Failed to load font from URL: {}", err);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let text_overlay = if cli.title.is_some() || cli.show_time {
         let font_size = (cli.height as f32 * 0.03).max(16.0);
-        Some(TextOverlay::new(font_size))
+        Some(TextOverlay::new(
+            font_size,
+            cli.font.as_deref(),
+            font_bytes.as_deref(),
+        ))
     } else {
         None
     };
