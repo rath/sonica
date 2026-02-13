@@ -120,7 +120,7 @@ The bottleneck is the per-frame GPU readback (`map_async` + `poll(Wait)`). A dou
 
 ## Not Yet Implemented
 
-- `#import` for shared shader composition (shaders currently self-contained)
+(All planned features have been implemented.)
 
 ## Conventions
 

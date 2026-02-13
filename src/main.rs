@@ -14,7 +14,7 @@ use wgpu;
 
 use cli::Cli;
 use render::gpu::GpuContext;
-use render::pipeline::{FrameUniforms, RenderPipeline};
+use render::pipeline::{ComputePipelineWrapper, FrameUniforms, RenderPipeline};
 use render::frame::{FrameRenderer, TEXTURE_FORMAT};
 use render::postprocess::PostProcessChain;
 use render::text::TextOverlay;
@@ -25,6 +25,7 @@ use templates::loader;
 struct TemplateSlot {
     pipeline: RenderPipeline,
     bind_group: wgpu::BindGroup,
+    compute_pipeline: Option<ComputePipelineWrapper>,
     name: String,
     start_frame: usize,
     end_frame: usize,
@@ -188,6 +189,13 @@ fn main() -> Result<()> {
             ],
         });
 
+        let compute_pipeline = if let Some(ref compute_src) = tmpl.compute_shader {
+            let compute_src = loader::inject_params(compute_src, &tmpl.manifest, &param_overrides);
+            Some(ComputePipelineWrapper::new(&gpu.device, &compute_src)?)
+        } else {
+            None
+        };
+
         let start_frame = i * frames_per_template;
         let end_frame = if i == num_templates - 1 {
             total_frames
@@ -203,6 +211,7 @@ fn main() -> Result<()> {
         slots.push(TemplateSlot {
             pipeline,
             bind_group,
+            compute_pipeline,
             name: tmpl.manifest.display_name.clone(),
             start_frame,
             end_frame,
@@ -215,7 +224,7 @@ fn main() -> Result<()> {
         log::info!("Post-processing effects: {:?}", effects);
     }
 
-    // 7. Start FFmpeg encoder
+    // 8. Start FFmpeg encoder
     log::info!("Starting FFmpeg encoder...");
     let mut encoder = FfmpegEncoder::new(
         &cli.output,
@@ -263,6 +272,12 @@ fn main() -> Result<()> {
         gpu.queue.write_buffer(&uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
         gpu.queue.write_buffer(&fft_buffer, 0, bytemuck::cast_slice(&frame.fft_bins));
         gpu.queue.write_buffer(&waveform_buffer, 0, bytemuck::cast_slice(&frame.waveform));
+
+        // Compute dispatch (if template has a compute shader)
+        if let Some(ref _compute) = slot.compute_pipeline {
+            // TODO: create compute bind group, dispatch, and submit
+            // Requires output buffer binding and workgroup size configuration
+        }
 
         // Render
         let mut pixels = if pp_chain.has_effects() {

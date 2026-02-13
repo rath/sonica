@@ -43,7 +43,6 @@ pub fn find_templates_dir() -> PathBuf {
     PathBuf::from(manifest_dir).join("templates")
 }
 
-#[allow(dead_code)]
 pub fn find_shaders_dir() -> PathBuf {
     let exe_dir = std::env::current_exe()
         .ok()
@@ -111,13 +110,15 @@ pub fn load_template(name: &str) -> Result<LoadedTemplate> {
         .with_context(|| format!("Failed to parse manifest: {}", manifest_path.display()))?;
 
     let fragment_path = template_dir.join(&manifest.shaders.fragment);
-    let fragment_shader = std::fs::read_to_string(&fragment_path)
+    let fragment_raw = std::fs::read_to_string(&fragment_path)
         .with_context(|| format!("Failed to read shader: {}", fragment_path.display()))?;
+    let fragment_shader = preprocess_imports(&fragment_raw)?;
 
     let compute_shader = if let Some(ref compute_name) = manifest.shaders.compute {
         let compute_path = template_dir.join(compute_name);
-        Some(std::fs::read_to_string(&compute_path)
-            .with_context(|| format!("Failed to read compute shader: {}", compute_path.display()))?)
+        let raw = std::fs::read_to_string(&compute_path)
+            .with_context(|| format!("Failed to read compute shader: {}", compute_path.display()))?;
+        Some(preprocess_imports(&raw)?)
     } else {
         None
     };
@@ -129,12 +130,30 @@ pub fn load_template(name: &str) -> Result<LoadedTemplate> {
     })
 }
 
-#[allow(dead_code)]
 pub fn load_shared_shader(relative_path: &str) -> Result<String> {
     let dir = find_shaders_dir();
     let path = dir.join(relative_path);
     std::fs::read_to_string(&path)
         .with_context(|| format!("Failed to read shared shader: {}", path.display()))
+}
+
+/// Process `// #import "filename.wgsl"` directives by replacing them with shared shader contents.
+pub fn preprocess_imports(shader_src: &str) -> Result<String> {
+    let mut result = String::with_capacity(shader_src.len());
+    for line in shader_src.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("// #import \"") {
+            if let Some(filename) = rest.strip_suffix('"') {
+                let shared = load_shared_shader(filename)?;
+                result.push_str(&shared);
+                result.push('\n');
+                continue;
+            }
+        }
+        result.push_str(line);
+        result.push('\n');
+    }
+    Ok(result)
 }
 
 /// Inject template parameters as WGSL const declarations prepended to the shader source.
