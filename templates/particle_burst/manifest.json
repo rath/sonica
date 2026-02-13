@@ -1,0 +1,13 @@
+{
+  "name": "particle_burst",
+  "display_name": "Particle Burst",
+  "description": "Beat-driven particle system with audio-reactive motion",
+  "shaders": {
+    "fragment": "main.wgsl"
+  },
+  "default_effects": ["bloom", "vignette"],
+  "parameters": {
+    "particle_count": { "type": "int", "default": 200, "min": 50, "max": 1000 },
+    "color_mode": { "type": "int", "default": 0, "min": 0, "max": 2 }
+  }
+}

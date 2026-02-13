@@ -1,0 +1,13 @@
+{
+  "name": "circular_spectrum",
+  "display_name": "Circular Spectrum",
+  "description": "Circular spectrum analyzer with beat-reactive radius",
+  "shaders": {
+    "fragment": "main.wgsl"
+  },
+  "default_effects": ["bloom", "vignette"],
+  "parameters": {
+    "segments": { "type": "int", "default": 128, "min": 32, "max": 512 },
+    "inner_radius": { "type": "float", "default": 0.2, "min": 0.05, "max": 0.4 }
+  }
+}

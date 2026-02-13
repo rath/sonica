@@ -1,0 +1,13 @@
+{
+  "name": "kaleidoscope",
+  "display_name": "Kaleidoscope",
+  "description": "Audio-reactive fractal kaleidoscope patterns",
+  "shaders": {
+    "fragment": "main.wgsl"
+  },
+  "default_effects": ["bloom", "chromatic_aberration"],
+  "parameters": {
+    "symmetry": { "type": "int", "default": 6, "min": 3, "max": 12 },
+    "zoom": { "type": "float", "default": 1.0, "min": 0.1, "max": 5.0 }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "waveform_scope",
+  "display_name": "Waveform Scope",
+  "description": "PCM waveform oscilloscope with glow effect",
+  "shaders": {
+    "fragment": "main.wgsl"
+  },
+  "default_effects": ["bloom", "vignette"],
+  "parameters": {
+    "line_thickness": { "type": "float", "default": 3.0, "min": 1.0, "max": 10.0 },
+    "glow_intensity": { "type": "float", "default": 0.8, "min": 0.0, "max": 2.0 }
+  }
+}

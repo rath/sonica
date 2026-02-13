@@ -1,0 +1,15 @@
+{
+  "name": "frequency_bars",
+  "display_name": "Frequency Bars",
+  "description": "Classic equalizer bars with logarithmic frequency mapping and color gradient",
+  "shaders": {
+    "fragment": "main.wgsl"
+  },
+  "default_effects": ["vignette", "bloom"],
+  "parameters": {
+    "bar_count": { "type": "int", "default": 64, "min": 8, "max": 512 },
+    "color_base": { "type": "color", "default": [0.0, 0.8, 1.0] },
+    "mirror": { "type": "bool", "default": true },
+    "gap_ratio": { "type": "float", "default": 0.2, "min": 0.0, "max": 0.5 }
+  }
+}
