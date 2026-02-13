@@ -38,7 +38,8 @@ Audio File → symphonia decode → 3-pass analysis → Vec<SmoothedFrame>
 | `src/render/pipeline.rs` | `FrameUniforms` (repr(C) Pod), `RenderPipeline` builder |
 | `src/render/frame.rs` | `FrameRenderer`: render target texture + output buffer + readback |
 | `src/render/postprocess.rs` | `PostProcessChain`: ping-pong effect chain, 6 built-in effects |
-| `src/templates/loader.rs` | Template discovery from `templates/` dir, shader loading |
+| `src/templates/loader.rs` | Template loading: filesystem first, embedded fallback |
+| `src/templates/embedded.rs` | Compile-time embedded templates and shaders via `include_str!` |
 | `src/templates/manifest.rs` | `manifest.json` serde schema |
 | `src/encode/ffmpeg.rs` | `FfmpegEncoder`: subprocess with piped stdin |
 
@@ -47,6 +48,8 @@ Audio File → symphonia decode → 3-pass analysis → Vec<SmoothedFrame>
 Each template is a directory under `templates/` containing:
 - `manifest.json` — metadata, default effects, parameter definitions
 - `main.wgsl` — fragment shader (must export `vs_main` and `fs_main`)
+
+All templates and shared shaders (`shaders/common.wgsl`) are embedded in the binary at compile time via `include_str!` in `embedded.rs`. The loader tries the filesystem first (for development), then falls back to embedded data (for `cargo install`).
 
 ### Shader Contract
 
@@ -102,6 +105,10 @@ When no `--effects` flag is given, the template's `default_effects` from `manife
 ## Build & Run
 
 ```bash
+# Install from git (templates are embedded in the binary)
+cargo install --git <repo-url>
+
+# Or build from source
 cargo build --release
 ./target/release/sonica audio.wav -o output.mp4
 ./target/release/sonica audio.wav -t circular_spectrum --effects crt --width 1920 --height 1080
