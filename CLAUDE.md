@@ -106,7 +106,7 @@ When no `--effects` flag is given, the template's `default_effects` from `manife
 
 ```bash
 # Install from git (templates are embedded in the binary)
-cargo install --git <repo-url>
+cargo install --git https://github.com/rath/sonica
 
 # Or build from source
 cargo build --release

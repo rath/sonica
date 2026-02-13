@@ -14,7 +14,7 @@ Takes an audio file, runs FFT analysis, renders visualizations with GPU shaders,
 ## Install
 
 ```bash
-cargo install --git <repo-url>
+cargo install --git https://github.com/rath/sonica
 ```
 
 All templates and shaders are embedded in the binary, so no additional files are needed.
@@ -22,7 +22,7 @@ All templates and shaders are embedded in the binary, so no additional files are
 ### Build from source
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/rath/sonica
 cd sonica
 cargo build --release
 # binary at target/release/sonica
