@@ -29,6 +29,9 @@ sonica audio.wav
 # Specify output and template
 sonica audio.wav -o visualizer.mp4 -t circular_spectrum
 
+# Cycle through all templates (equal duration each)
+sonica audio.wav -t all --effects crt
+
 # CRT retro style
 sonica audio.wav --effects crt
 
@@ -52,6 +55,7 @@ sonica --list-templates
 | `spectrogram` | Scrolling time-frequency heatmap |
 | `particle_burst` | Beat-driven particle system |
 | `kaleidoscope` | Audio-reactive fractal kaleidoscope |
+| `all` | Cycle through all templates, equal duration each |
 
 ## Effects
 
@@ -82,7 +86,8 @@ Arguments:
 
 Options:
   -o, --output <PATH>        Output video file [default: output.mp4]
-  -t, --template <NAME>      Template name [default: frequency_bars]
+  -t, --template <NAME>      Template name, or "all" to cycle [default: frequency_bars]
+  -b, --bitrate <RATE>       Video bitrate (e.g. 2400k, 5M), overrides --crf
       --width <PX>           Video width [default: 1920]
       --height <PX>          Video height [default: 1080]
       --fps <N>              Frames per second [default: 30]

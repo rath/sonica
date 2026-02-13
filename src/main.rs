@@ -21,6 +21,14 @@ use encode::ffmpeg::FfmpegEncoder;
 use audio::features::SmoothedFrame;
 use templates::loader;
 
+struct TemplateSlot {
+    pipeline: RenderPipeline,
+    bind_group: wgpu::BindGroup,
+    name: String,
+    start_frame: usize,
+    end_frame: usize,
+}
+
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_timestamp_millis()
@@ -64,26 +72,32 @@ fn main() -> Result<()> {
     let total_frames = frames.len();
     log::info!("Total frames: {}, Duration: {:.1}s", total_frames, global.duration);
 
-    // 3. Load template
-    let template = loader::load_template(&cli.template)?;
-    log::info!("Template: {} ({})", template.manifest.display_name, template.manifest.name);
+    // 3. Resolve template names
+    let template_names: Vec<String> = if cli.template == "all" {
+        loader::list_templates()?
+    } else {
+        vec![cli.template.clone()]
+    };
 
-    // Use template default effects if none specified via CLI
+    if template_names.is_empty() {
+        anyhow::bail!("No templates found");
+    }
+
+    // Determine effects: CLI > first template's defaults
+    let first_template = loader::load_template(&template_names[0])?;
     let effects = if cli.effects.is_empty() {
-        template.manifest.default_effects.clone()
+        first_template.manifest.default_effects.clone()
     } else {
         cli.effects.clone()
     };
+    drop(first_template);
 
     // 4. Initialize GPU
     log::info!("Initializing GPU...");
     let gpu = GpuContext::new()?;
-
-    // 5. Create render pipeline
-    let render_pipeline = RenderPipeline::new(&gpu.device, &template.fragment_shader, TEXTURE_FORMAT)?;
     let frame_renderer = FrameRenderer::new(&gpu, cli.width, cli.height);
 
-    // 6. Create GPU buffers
+    // 5. Create shared GPU buffers
     let uniform_buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("uniform_buffer"),
         size: std::mem::size_of::<FrameUniforms>() as u64,
@@ -107,24 +121,54 @@ fn main() -> Result<()> {
         mapped_at_creation: false,
     });
 
-    let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("main_bind_group"),
-        layout: &render_pipeline.bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: fft_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: waveform_buffer.as_entire_binding(),
-            },
-        ],
-    });
+    // 6. Build per-template pipelines and bind groups, assign frame ranges
+    let num_templates = template_names.len();
+    let frames_per_template = total_frames / num_templates;
+    let mut slots: Vec<TemplateSlot> = Vec::with_capacity(num_templates);
+
+    for (i, name) in template_names.iter().enumerate() {
+        let tmpl = loader::load_template(name)?;
+        let pipeline = RenderPipeline::new(&gpu.device, &tmpl.fragment_shader, TEXTURE_FORMAT)?;
+
+        let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("main_bind_group"),
+            layout: &pipeline.bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: fft_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: waveform_buffer.as_entire_binding(),
+                },
+            ],
+        });
+
+        let start_frame = i * frames_per_template;
+        let end_frame = if i == num_templates - 1 {
+            total_frames
+        } else {
+            (i + 1) * frames_per_template
+        };
+
+        log::info!(
+            "Template [{}]: {} (frames {}-{})",
+            i, tmpl.manifest.display_name, start_frame, end_frame - 1
+        );
+
+        slots.push(TemplateSlot {
+            pipeline,
+            bind_group,
+            name: tmpl.manifest.display_name.clone(),
+            start_frame,
+            end_frame,
+        });
+    }
 
     // 6b. Post-processing chain
     let pp_chain = PostProcessChain::new(&gpu.device, cli.width, cli.height, &effects)?;
@@ -155,21 +199,27 @@ fn main() -> Result<()> {
             .progress_chars("=>-"),
     );
 
+    let mut current_slot_idx = 0;
+
     for (frame_idx, frame) in frames.iter().enumerate() {
+        // Advance to the correct template slot
+        while current_slot_idx + 1 < slots.len()
+            && frame_idx >= slots[current_slot_idx].end_frame
+        {
+            current_slot_idx += 1;
+            log::info!("Switching to template: {}", slots[current_slot_idx].name);
+        }
+        let slot = &slots[current_slot_idx];
+
         // Update uniforms
         let uniforms = build_uniforms(frame, frame_idx as u32, cli.width, cli.height, cli.fps, global.duration);
         gpu.queue.write_buffer(&uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
-
-        // Update FFT buffer
         gpu.queue.write_buffer(&fft_buffer, 0, bytemuck::cast_slice(&frame.fft_bins));
-
-        // Update waveform buffer
         gpu.queue.write_buffer(&waveform_buffer, 0, bytemuck::cast_slice(&frame.waveform));
 
-        // Render template
+        // Render
         let pixels = if pp_chain.has_effects() {
-            // Render to texture, then post-process, then readback
-            frame_renderer.render_and_readback(&gpu, &render_pipeline.pipeline, &bind_group)?;
+            frame_renderer.render_and_readback(&gpu, &slot.pipeline.pipeline, &slot.bind_group)?;
             let final_texture = pp_chain.run(
                 &gpu.device,
                 &gpu.queue,
@@ -178,12 +228,10 @@ fn main() -> Result<()> {
             );
             frame_renderer.readback_texture(&gpu, final_texture)?
         } else {
-            frame_renderer.render_and_readback(&gpu, &render_pipeline.pipeline, &bind_group)?
+            frame_renderer.render_and_readback(&gpu, &slot.pipeline.pipeline, &slot.bind_group)?
         };
 
-        // Write to FFmpeg
         encoder.write_frame(&pixels)?;
-
         pb.set_position(frame_idx as u64 + 1);
     }
 
