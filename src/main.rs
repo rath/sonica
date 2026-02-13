@@ -256,7 +256,7 @@ fn main() -> Result<()> {
     };
 
     let text_overlay = if cli.title.is_some() || cli.show_time {
-        let font_size = (cli.height as f32 * 0.03).max(16.0);
+        let font_size = (cli.height as f32 * 0.046).max(24.0);
         Some(TextOverlay::new(
             font_size,
             cli.font.as_deref(),
@@ -316,7 +316,7 @@ fn main() -> Result<()> {
         // Text overlay compositing
         if let Some(ref overlay) = text_overlay {
             let color = [255u8, 255, 255, 220];
-            let margin = (cli.height as f32 * 0.03) as u32;
+            let margin = (cli.height as f32 * 0.07) as u32;
 
             if let Some(ref title) = cli.title {
                 let tw = overlay.measure_width(title);
