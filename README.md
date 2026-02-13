@@ -129,7 +129,7 @@ Options:
       --title <TEXT>         Title text overlay (bottom center)
       --font <PATH>          Font file for title/time overlay (TTF/OTF)
       --font-url <URL>       Font URL for title/time overlay (TTF/OTF or Google Fonts URL)
-      --show-time            Show elapsed time overlay (bottom right)
+      --show-time            Show elapsed time overlay, MM:SS.CC (bottom right)
       --param <KEY=VALUE>    Template parameter overrides, comma-separated
       --config <PATH>        Config file path [default: ./sonica.toml]
       --codec <NAME>         FFmpeg video codec [default: libx264]

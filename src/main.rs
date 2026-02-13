@@ -327,10 +327,11 @@ fn main() -> Result<()> {
 
             if cli.show_time {
                 let total_secs = frame.time as u64;
+                let centis = ((frame.time - total_secs as f32) * 100.0) as u64;
                 let time_str = if total_secs >= 3600 {
-                    format!("{:02}:{:02}:{:02}", total_secs / 3600, (total_secs % 3600) / 60, total_secs % 60)
+                    format!("{:02}:{:02}:{:02}.{:02}", total_secs / 3600, (total_secs % 3600) / 60, total_secs % 60, centis)
                 } else {
-                    format!("{:02}:{:02}", total_secs / 60, total_secs % 60)
+                    format!("{:02}:{:02}.{:02}", total_secs / 60, total_secs % 60, centis)
                 };
                 let tw = overlay.measure_width(&time_str);
                 let tx = cli.width - margin - tw;
