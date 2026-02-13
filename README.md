@@ -8,7 +8,8 @@ Takes an audio file, runs FFT analysis, renders visualizations with GPU shaders,
 
 - Rust 1.70+
 - ffmpeg (must be in PATH)
-- macOS with Metal, or Linux/Windows with Vulkan/DX12
+- macOS (Metal) — tested
+- Linux (Vulkan) / Windows (DX12) — should work but untested
 
 ## Install
 
