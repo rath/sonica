@@ -1,5 +1,4 @@
 mod cli;
-#[allow(dead_code)]
 mod config;
 mod audio;
 mod render;
@@ -35,7 +34,30 @@ fn main() -> Result<()> {
         .format_timestamp_millis()
         .init();
 
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+
+    // Load config: explicit --config path, or auto-detect sonica.toml
+    let config_path = cli.config.clone().or_else(|| {
+        let default = std::path::PathBuf::from("sonica.toml");
+        if default.exists() { Some(default) } else { None }
+    });
+    if let Some(ref path) = config_path {
+        if let Some(cfg) = config::load_config(path) {
+            log::info!("Loaded config from {}", path.display());
+            // Merge: config values apply only when CLI is at its default
+            if cli.width == 1920 { cli.width = cfg.output.width; }
+            if cli.height == 1080 { cli.height = cfg.output.height; }
+            if cli.fps == 30 { cli.fps = cfg.output.fps; }
+            if cli.crf == 18 { cli.crf = cfg.output.crf; }
+            if cli.codec == "libx264" { cli.codec = cfg.output.codec; }
+            if cli.smoothing == 0.85 { cli.smoothing = cfg.audio.smoothing; }
+            if cli.effects.is_empty() && !cfg.effects.is_empty() {
+                cli.effects = cfg.effects;
+            }
+        } else {
+            log::warn!("Failed to load config from {}", path.display());
+        }
+    }
 
     // List templates mode
     if cli.list_templates {

@@ -96,10 +96,31 @@ Options:
       --smoothing <F>        Audio smoothing factor, 0.0-1.0 [default: 0.85]
       --title <TEXT>         Title text overlay (bottom center)
       --show-time            Show elapsed time overlay (bottom right)
+      --config <PATH>        Config file path [default: ./sonica.toml]
       --codec <NAME>         FFmpeg video codec [default: libx264]
       --pix-fmt <FMT>        FFmpeg pixel format [default: yuv420p]
       --list-templates       List available templates and exit
   -h, --help                 Print help
+```
+
+## Configuration File
+
+Sonica can read settings from a TOML config file. By default it looks for `sonica.toml` in the current directory. Use `--config <path>` to specify a custom path.
+
+CLI flags always take priority over config values.
+
+```toml
+[output]
+width = 1280
+height = 720
+fps = 60
+crf = 15
+codec = "libx264"
+
+[audio]
+smoothing = 0.9
+
+effects = ["bloom", "vignette"]
 ```
 
 ## Supported Audio Formats

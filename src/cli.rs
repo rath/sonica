@@ -51,6 +51,10 @@ pub struct Cli {
     #[arg(long, default_value_t = 0.85)]
     pub smoothing: f32,
 
+    /// Config file path (defaults to ./sonica.toml if present)
+    #[arg(long)]
+    pub config: Option<PathBuf>,
+
     /// List available templates and exit
     #[arg(long)]
     pub list_templates: bool,

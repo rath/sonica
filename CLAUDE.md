@@ -30,7 +30,7 @@ Audio File → symphonia decode → 3-pass analysis → Vec<SmoothedFrame>
 |------|---------|
 | `src/main.rs` | CLI parsing, orchestration loop |
 | `src/cli.rs` | clap derive struct for all CLI args |
-| `src/config.rs` | TOML config schema (prepared, not yet wired into main) |
+| `src/config.rs` | TOML config schema, loaded from `sonica.toml` or `--config` |
 | `src/audio/decode.rs` | symphonia → `Vec<f32>` mono PCM |
 | `src/audio/analysis.rs` | 3-pass pipeline: global stats → per-frame FFT (rayon) → bidirectional smoothing |
 | `src/audio/features.rs` | `FrameFeatures`, `SmoothedFrame`, `GlobalAnalysis` structs |
@@ -120,8 +120,7 @@ The bottleneck is the per-frame GPU readback (`map_async` + `poll(Wait)`). A dou
 
 ## Not Yet Implemented
 
-- TOML config file loading (`config.rs` schema exists but isn't integrated into main)
-- naga_oil `#import` for shared shader composition (shaders currently self-contained)
+- `#import` for shared shader composition (shaders currently self-contained)
 
 ## Conventions
 
