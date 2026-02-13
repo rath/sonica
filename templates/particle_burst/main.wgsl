@@ -70,7 +70,8 @@ const TWO_PI: f32 = 6.2831853;
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let aspect = u.resolution.x / u.resolution.y;
     var p = in.uv - vec2<f32>(0.5);
-    p.x *= aspect;
+    p.x *= max(aspect, 1.0);
+    p.y *= max(1.0 / aspect, 1.0);
 
     var color = vec3<f32>(0.01, 0.01, 0.02);
     let particle_count = PARAM_PARTICLE_COUNT;

@@ -76,7 +76,8 @@ fn pattern(p: vec2<f32>, t: f32) -> f32 {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let aspect = u.resolution.x / u.resolution.y;
     var p = (in.uv - vec2<f32>(0.5)) * 2.0;
-    p.x *= aspect;
+    p.x *= max(aspect, 1.0);
+    p.y *= max(1.0 / aspect, 1.0);
 
     // Audio-reactive zoom
     let zoom = PARAM_ZOOM + 0.5 + u.bass * 0.5 + u.beat_intensity * 0.3;

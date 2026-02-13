@@ -4,6 +4,8 @@ mod audio;
 mod render;
 mod templates;
 mod encode;
+#[cfg(feature = "subtitles")]
+mod subtitle;
 
 use anyhow::{Context, Result};
 use bytemuck;
@@ -76,6 +78,18 @@ fn main() -> Result<()> {
             if cli.font_url.is_none() {
                 cli.font_url = cfg.output.font_url;
             }
+            if cli.whisper_model == "base" {
+                cli.whisper_model = cfg.subtitle.whisper_model;
+            }
+            if cli.subtitle_lang.is_none() {
+                cli.subtitle_lang = cfg.subtitle.language;
+            }
+            if cli.subtitle_font_size == 48.0 {
+                cli.subtitle_font_size = cfg.subtitle.font_size;
+            }
+            if cli.subtitle_max_chars == 42 {
+                cli.subtitle_max_chars = cfg.subtitle.max_chars_per_line;
+            }
         } else {
             log::warn!("Failed to load config from {}", path.display());
         }
@@ -109,6 +123,31 @@ fn main() -> Result<()> {
     // 1. Decode audio
     log::info!("Decoding audio...");
     let audio_data = audio::decode::decode_audio(input)?;
+
+    // 1b. Transcribe audio (if subtitles enabled)
+    #[cfg(feature = "subtitles")]
+    let subtitle_cues = if cli.subtitles {
+        log::info!("Transcribing audio for subtitles...");
+        let model_path = subtitle::model::resolve_model_path(&cli.whisper_model)?;
+        let transcriber = subtitle::transcribe::WhisperTranscriber::new(
+            &model_path,
+            cli.subtitle_lang.as_deref(),
+        )?;
+        let words = transcriber.transcribe(&audio_data.samples, audio_data.sample_rate)?;
+        let cues = subtitle::cue::group_words(words, cli.subtitle_max_chars);
+        log::info!("Transcribed {} subtitle cues", cues.len());
+        Some(cues)
+    } else {
+        None
+    };
+
+    #[cfg(not(feature = "subtitles"))]
+    if cli.subtitles {
+        anyhow::bail!(
+            "Subtitle support requires the 'subtitles' feature. \
+             Rebuild with: cargo build --features subtitles"
+        );
+    }
 
     // 2. Analyze audio (3-pass pipeline)
     log::info!("Analyzing audio...");
@@ -271,7 +310,8 @@ fn main() -> Result<()> {
     };
 
     let text_overlay = if cli.title.is_some() || cli.show_time {
-        let font_size = (cli.height as f32 * 0.046).max(24.0);
+        let shorter = cli.width.min(cli.height) as f32;
+        let font_size = (shorter * 0.046).max(24.0);
         Some(TextOverlay::new(
             font_size,
             cli.font.as_deref(),
@@ -280,6 +320,17 @@ fn main() -> Result<()> {
     } else {
         None
     };
+
+    // 8b. Subtitle renderer
+    #[cfg(feature = "subtitles")]
+    let subtitle_renderer = subtitle_cues.map(|cues| {
+        let sub_overlay = TextOverlay::new(
+            cli.subtitle_font_size,
+            cli.font.as_deref(),
+            font_bytes.as_deref(),
+        );
+        subtitle::render::SubtitleRenderer::new(cues, sub_overlay, cli.subtitle_max_chars)
+    });
 
     // 9. Render loop
     let pb = ProgressBar::new(total_frames as u64);
@@ -331,7 +382,8 @@ fn main() -> Result<()> {
         // Text overlay compositing
         if let Some(ref overlay) = text_overlay {
             let color = [255u8, 255, 255, 220];
-            let margin = (cli.height as f32 * 0.07) as u32;
+            let shorter = cli.width.min(cli.height) as f32;
+            let margin = (shorter * 0.07) as u32;
 
             if let Some(ref title) = cli.title {
                 let tw = overlay.measure_width(title);
@@ -353,6 +405,12 @@ fn main() -> Result<()> {
                 let ty = cli.height - margin - overlay.line_height();
                 overlay.composite(&mut pixels, cli.width, cli.height, &time_str, tx, ty, color);
             }
+        }
+
+        // Subtitle overlay
+        #[cfg(feature = "subtitles")]
+        if let Some(ref sub) = subtitle_renderer {
+            sub.render_frame(&mut pixels, cli.width, cli.height, frame.time);
         }
 
         encoder.write_frame(&pixels)?;

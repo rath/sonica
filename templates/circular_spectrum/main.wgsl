@@ -72,9 +72,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let num_bins = arrayLength(&fft_bins);
     let aspect = u.resolution.x / u.resolution.y;
 
-    // Center and correct aspect ratio
+    // Center and correct aspect ratio (fit to shorter axis)
     var p = in.uv - vec2<f32>(0.5);
-    p.x *= aspect;
+    p.x *= max(aspect, 1.0);
+    p.y *= max(1.0 / aspect, 1.0);
 
     let dist = length(p);
     let angle = atan2(p.y, p.x);
