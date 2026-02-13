@@ -37,10 +37,25 @@ fn main() -> Result<()> {
 
     let mut cli = Cli::parse();
 
-    // Load config: explicit --config path, or auto-detect sonica.toml
+    // Load config: explicit --config path, or auto-detect sonica.toml / global config
     let config_path = cli.config.clone().or_else(|| {
-        let default = std::path::PathBuf::from("sonica.toml");
-        if default.exists() { Some(default) } else { None }
+        let local = std::path::PathBuf::from("sonica.toml");
+        if local.exists() {
+            return Some(local);
+        }
+        if let Some(home) = dirs::home_dir() {
+            let xdg = home.join(".config").join("sonica").join("config.toml");
+            if xdg.exists() {
+                return Some(xdg);
+            }
+        }
+        if let Some(config_dir) = dirs::config_dir() {
+            let platform = config_dir.join("sonica").join("config.toml");
+            if platform.exists() {
+                return Some(platform);
+            }
+        }
+        None
     });
     if let Some(ref path) = config_path {
         if let Some(cfg) = config::load_config(path) {
@@ -320,8 +335,8 @@ fn main() -> Result<()> {
 
             if let Some(ref title) = cli.title {
                 let tw = overlay.measure_width(title);
-                let tx = cli.width.saturating_sub(tw) / 2;
-                let ty = cli.height - margin - overlay.line_height();
+                let tx = cli.width - margin - tw;
+                let ty = margin;
                 overlay.composite(&mut pixels, cli.width, cli.height, title, tx, ty, color);
             }
 

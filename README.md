@@ -126,7 +126,7 @@ Options:
       --crf <N>              H.264 quality, 0-51, lower=better [default: 18]
       --effects <LIST>       Post-processing effects, comma-separated (use "none" to disable)
       --smoothing <F>        Audio smoothing factor, 0.0-1.0 [default: 0.85]
-      --title <TEXT>         Title text overlay (bottom center)
+      --title <TEXT>         Title text overlay (top right)
       --font <PATH>          Font file for title/time overlay (TTF/OTF)
       --font-url <URL>       Font URL for title/time overlay (TTF/OTF or Google Fonts URL)
       --show-time            Show elapsed time overlay, MM:SS.CC (bottom right)
@@ -157,9 +157,14 @@ Use `--list-templates` to see available templates. Check each template's `manife
 
 ## Configuration File
 
-Sonica can read settings from a TOML config file. By default it looks for `sonica.toml` in the current directory. Use `--config <path>` to specify a custom path.
+Sonica loads config from the first file found in this order:
 
-CLI flags always take priority over config values.
+1. `--config <path>` (explicit)
+2. `./sonica.toml` (current directory)
+3. `~/.config/sonica/config.toml` (global, works on all platforms)
+4. Platform-specific config dir (`~/Library/Application Support` on macOS)
+
+CLI flags always take priority over config values. See `sonica.toml.example` for a full annotated example.
 
 ```toml
 [output]

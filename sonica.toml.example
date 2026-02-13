@@ -1,0 +1,47 @@
+# Sonica configuration example
+# Copy this file to sonica.toml and customize as needed.
+# CLI flags always take priority over config values.
+
+[output]
+# Video resolution (default: 1920x1080)
+width = 1920
+height = 1080
+
+# Frames per second (default: 30)
+fps = 30
+
+# H.264 CRF quality: 0-51, lower = better quality (default: 18)
+# Ignored when bitrate is set via --bitrate CLI flag.
+crf = 18
+
+# FFmpeg video codec (default: "libx264")
+# Examples: "libx264", "h264_videotoolbox" (macOS HW encoding)
+codec = "libx264"
+
+# Font file path for title/time overlay (TTF/OTF)
+# font = "/System/Library/Fonts/Supplemental/NotoSansCJK-Regular.ttc"
+
+# Font URL for title/time overlay (direct TTF/OTF URL)
+# font_url = "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/SubsetOTF/KR/NotoSansKR-Regular.otf"
+
+[audio]
+# Smoothing factor for audio analysis, 0.0-1.0 (default: 0.85)
+# Higher = smoother animation, lower = more reactive
+smoothing = 0.85
+
+# Post-processing effects (default: template-specific)
+# Available: "bloom", "chromatic_aberration", "vignette", "film_grain", "crt_scanlines", "color_grading"
+# Presets: "crt" = scanlines + chromatic_aberration + vignette + film_grain + color_grading
+# Set to ["none"] to disable all effects.
+effects = ["bloom", "vignette"]
+
+# ---------------------------------------------------------------------------
+# The following options are CLI-only and cannot be set in this config file:
+#   --template (-t)    Template name or "all"
+#   --title            Title text overlay (top right)
+#   --show-time        Elapsed time overlay (bottom right)
+#   --bitrate (-b)     Video bitrate (e.g. "2400k", "5M")
+#   --pix-fmt          FFmpeg pixel format (default: yuv420p)
+#   --param            Template parameter overrides (e.g. bar_count=128)
+#   --output (-o)      Output file path
+# ---------------------------------------------------------------------------
