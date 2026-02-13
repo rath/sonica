@@ -77,22 +77,14 @@ https://github.com/user-attachments/assets/89f9a6b8-d322-4a01-b180-4b04c06015d7
 ### waveform_scope
 PCM waveform oscilloscope with glow
 
-https://github.com/user-attachments/assets/04d19960-2676-401c-a844-8f12c2986a7f
-
 ### frequency_bars
 Classic equalizer bars with log frequency mapping
-
-https://github.com/user-attachments/assets/2e3a6ac7-0014-4a59-9ecd-8c968018ce48
 
 ### kaleidoscope
 Audio-reactive fractal kaleidoscope
 
-https://github.com/user-attachments/assets/502ccbc0-7242-4736-a837-72588b1f16e7
-
 ### spectrogram
 Scrolling time-frequency heatmap
-
-https://github.com/user-attachments/assets/e01722fc-a38a-473f-a321-81781299f108
 
 ### all
 Cycle through all templates, equal duration each.
