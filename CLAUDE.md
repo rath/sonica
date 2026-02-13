@@ -121,11 +121,9 @@ The bottleneck is the per-frame GPU readback (`map_async` + `poll(Wait)`). A dou
 ## Not Yet Implemented
 
 - `--title` / `--show-time` text overlay (needs fontdue CPU rasterizer → texture composite)
-- `--dev` mode (winit window + shader hot-reload via notify crate + cpal audio playback)
 - `--smoothing` CLI flag is parsed but not wired to the analysis alpha parameter
 - TOML config file loading (`config.rs` schema exists but isn't integrated into main)
 - naga_oil `#import` for shared shader composition (shaders currently self-contained)
-- `--effects none` to explicitly disable template default effects
 
 ## Conventions
 

@@ -83,9 +83,11 @@ fn main() -> Result<()> {
         anyhow::bail!("No templates found");
     }
 
-    // Determine effects: CLI > first template's defaults
+    // Determine effects: "none" disables all, CLI > template defaults
     let first_template = loader::load_template(&template_names[0])?;
-    let effects = if cli.effects.is_empty() {
+    let effects = if cli.effects.iter().any(|e| e == "none") {
+        Vec::new()
+    } else if cli.effects.is_empty() {
         first_template.manifest.default_effects.clone()
     } else {
         cli.effects.clone()

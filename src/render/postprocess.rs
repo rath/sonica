@@ -282,6 +282,7 @@ fn expand_effects(effects: &[String]) -> Vec<String> {
     let mut result = Vec::new();
     for e in effects {
         match e.as_str() {
+            "none" => return Vec::new(),
             "crt" => {
                 result.extend_from_slice(&[
                     "crt_scanlines".into(),
