@@ -64,6 +64,7 @@ impl TextOverlay {
         for ch in text.chars() {
             let (metrics, bitmap) = self.rasterize_with_fallback(ch);
             if metrics.width == 0 || metrics.height == 0 || bitmap.is_empty() {
+                cursor_x += metrics.advance_width as i32;
                 continue;
             }
 
