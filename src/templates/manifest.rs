@@ -1,7 +1,6 @@
 use serde::Deserialize;
 use std::collections::HashMap;
 
-#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct TemplateManifest {
     pub name: String,
@@ -22,7 +21,6 @@ pub struct ShaderPaths {
     pub compute: Option<String>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct ParamDef {
     #[serde(rename = "type")]

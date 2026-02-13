@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use super::manifest::TemplateManifest;
 
-#[allow(dead_code)]
 pub struct LoadedTemplate {
     pub manifest: TemplateManifest,
     pub fragment_shader: String,
@@ -135,4 +135,75 @@ pub fn load_shared_shader(relative_path: &str) -> Result<String> {
     let path = dir.join(relative_path);
     std::fs::read_to_string(&path)
         .with_context(|| format!("Failed to read shared shader: {}", path.display()))
+}
+
+/// Inject template parameters as WGSL const declarations prepended to the shader source.
+pub fn inject_params(
+    shader_src: &str,
+    manifest: &TemplateManifest,
+    overrides: &HashMap<String, String>,
+) -> String {
+    if manifest.parameters.is_empty() {
+        return shader_src.to_string();
+    }
+
+    let mut consts = String::from("// Template parameters\n");
+
+    for (name, param_def) in &manifest.parameters {
+        let upper_name = name.to_uppercase();
+        let value = overrides.get(name.as_str());
+
+        match param_def.param_type.as_str() {
+            "int" => {
+                let v: i64 = value
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or_else(|| param_def.default.as_i64().unwrap_or(0));
+                consts.push_str(&format!("const PARAM_{}: i32 = {};\n", upper_name, v));
+            }
+            "float" => {
+                let v: f64 = value
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or_else(|| param_def.default.as_f64().unwrap_or(0.0));
+                consts.push_str(&format!("const PARAM_{}: f32 = {:.6};\n", upper_name, v));
+            }
+            "bool" => {
+                let v: bool = value
+                    .map(|v| v == "true" || v == "1")
+                    .unwrap_or_else(|| param_def.default.as_bool().unwrap_or(false));
+                consts.push_str(&format!(
+                    "const PARAM_{}: i32 = {};\n",
+                    upper_name,
+                    if v { 1 } else { 0 }
+                ));
+            }
+            "color" => {
+                let (r, g, b) = if let Some(v) = value {
+                    // Parse "r,g,b" or "#rrggbb"
+                    let parts: Vec<f64> = v.split(':').filter_map(|s| s.parse().ok()).collect();
+                    if parts.len() >= 3 {
+                        (parts[0], parts[1], parts[2])
+                    } else {
+                        (0.0, 0.0, 0.0)
+                    }
+                } else if let Some(arr) = param_def.default.as_array() {
+                    (
+                        arr.first().and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        arr.get(1).and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        arr.get(2).and_then(|v| v.as_f64()).unwrap_or(0.0),
+                    )
+                } else {
+                    (0.0, 0.0, 0.0)
+                };
+                consts.push_str(&format!("const PARAM_{}_R: f32 = {:.6};\n", upper_name, r));
+                consts.push_str(&format!("const PARAM_{}_G: f32 = {:.6};\n", upper_name, g));
+                consts.push_str(&format!("const PARAM_{}_B: f32 = {:.6};\n", upper_name, b));
+            }
+            _ => {
+                log::warn!("Unknown parameter type '{}' for '{}'", param_def.param_type, name);
+            }
+        }
+    }
+
+    consts.push('\n');
+    format!("{}{}", consts, shader_src)
 }

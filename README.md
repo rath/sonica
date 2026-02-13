@@ -96,12 +96,30 @@ Options:
       --smoothing <F>        Audio smoothing factor, 0.0-1.0 [default: 0.85]
       --title <TEXT>         Title text overlay (bottom center)
       --show-time            Show elapsed time overlay (bottom right)
+      --param <KEY=VALUE>    Template parameter overrides, comma-separated
       --config <PATH>        Config file path [default: ./sonica.toml]
       --codec <NAME>         FFmpeg video codec [default: libx264]
       --pix-fmt <FMT>        FFmpeg pixel format [default: yuv420p]
       --list-templates       List available templates and exit
   -h, --help                 Print help
 ```
+
+## Template Parameters
+
+Each template defines configurable parameters (bar count, colors, etc.) with `--param`:
+
+```bash
+# Change bar count and disable mirroring
+sonica audio.wav -t frequency_bars --param bar_count=128,mirror=false,gap_ratio=0.1
+
+# Kaleidoscope with 8-fold symmetry
+sonica audio.wav -t kaleidoscope --param symmetry=8,zoom=2.0
+
+# More particles
+sonica audio.wav -t particle_burst --param particle_count=500
+```
+
+Use `--list-templates` to see available templates. Check each template's `manifest.json` for parameter definitions.
 
 ## Configuration File
 

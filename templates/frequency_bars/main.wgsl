@@ -77,9 +77,9 @@ fn sample_fft_log(t: f32, num_bins: u32) -> f32 {
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let uv = in.uv;
     let num_bins = arrayLength(&fft_bins);
-    let bar_count = 64u;
-    let gap_ratio = 0.2;
-    let mirror = true;
+    let bar_count = u32(PARAM_BAR_COUNT);
+    let gap_ratio = PARAM_GAP_RATIO;
+    let mirror = PARAM_MIRROR != 0;
 
     // Which bar are we in?
     var bar_uv_x = uv.x;
@@ -114,11 +114,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         return vec4<f32>(bg, 1.0);
     }
 
-    // Color: hue based on frequency position, brightness based on height
+    // Color: mix base color with frequency-based gradient
+    let base_color = vec3<f32>(PARAM_COLOR_BASE_R, PARAM_COLOR_BASE_G, PARAM_COLOR_BASE_B);
     let hue = t * 0.6 + 0.55; // cyan → magenta range
     let sat = 0.8 + u.beat_intensity * 0.2;
     let val = 0.6 + (y / max(height, 0.001)) * 0.4;
-    var color = hsv2rgb(hue % 1.0, sat, val);
+    var color = hsv2rgb(hue % 1.0, sat, val) * base_color * 2.0;
 
     // Glow at the top of each bar
     let top_dist = abs(y - height);

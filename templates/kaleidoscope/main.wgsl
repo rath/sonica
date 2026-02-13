@@ -79,7 +79,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     p.x *= aspect;
 
     // Audio-reactive zoom
-    let zoom = 1.5 + u.bass * 0.5 + u.beat_intensity * 0.3;
+    let zoom = PARAM_ZOOM + 0.5 + u.bass * 0.5 + u.beat_intensity * 0.3;
     p *= zoom;
 
     // Rotation driven by time and spectral centroid
@@ -90,7 +90,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     p = vec2<f32>(p.x * cs - p.y * sn, p.x * sn + p.y * cs);
 
     // Kaleidoscope symmetry
-    let symmetry = 6.0;
+    let symmetry = f32(PARAM_SYMMETRY);
     let kp = kaleidoscope_fold(p, symmetry);
 
     // Layer 1: base pattern

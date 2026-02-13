@@ -9,6 +9,7 @@ use anyhow::{Context, Result};
 use bytemuck;
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
+use std::collections::HashMap;
 use wgpu;
 
 use cli::Cli;
@@ -146,14 +147,27 @@ fn main() -> Result<()> {
         mapped_at_creation: false,
     });
 
-    // 6. Build per-template pipelines and bind groups, assign frame ranges
+    // 6. Parse template parameter overrides
+    let param_overrides: HashMap<String, String> = cli
+        .params
+        .iter()
+        .filter_map(|s| {
+            let mut parts = s.splitn(2, '=');
+            let key = parts.next()?.to_string();
+            let val = parts.next()?.to_string();
+            Some((key, val))
+        })
+        .collect();
+
+    // 7. Build per-template pipelines and bind groups, assign frame ranges
     let num_templates = template_names.len();
     let frames_per_template = total_frames / num_templates;
     let mut slots: Vec<TemplateSlot> = Vec::with_capacity(num_templates);
 
     for (i, name) in template_names.iter().enumerate() {
         let tmpl = loader::load_template(name)?;
-        let pipeline = RenderPipeline::new(&gpu.device, &tmpl.fragment_shader, TEXTURE_FORMAT)?;
+        let shader_src = loader::inject_params(&tmpl.fragment_shader, &tmpl.manifest, &param_overrides);
+        let pipeline = RenderPipeline::new(&gpu.device, &shader_src, TEXTURE_FORMAT)?;
 
         let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("main_bind_group"),
@@ -195,7 +209,7 @@ fn main() -> Result<()> {
         });
     }
 
-    // 6b. Post-processing chain
+    // 7b. Post-processing chain
     let pp_chain = PostProcessChain::new(&gpu.device, cli.width, cli.height, &effects)?;
     if pp_chain.has_effects() {
         log::info!("Post-processing effects: {:?}", effects);

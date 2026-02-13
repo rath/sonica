@@ -51,6 +51,10 @@ pub struct Cli {
     #[arg(long, default_value_t = 0.85)]
     pub smoothing: f32,
 
+    /// Template parameter overrides (key=value, comma-separated)
+    #[arg(long = "param", value_delimiter = ',')]
+    pub params: Vec<String>,
+
     /// Config file path (defaults to ./sonica.toml if present)
     #[arg(long)]
     pub config: Option<PathBuf>,

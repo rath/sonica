@@ -81,7 +81,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let norm_angle = (angle + PI) / TWO_PI; // 0..1
 
     // Inner radius with beat pulse
-    let inner_r = 0.15 + u.beat_intensity * 0.06;
+    let inner_r = PARAM_INNER_RADIUS + u.beat_intensity * 0.06;
 
     // Sample FFT at this angle
     let fft_val = sample_fft_log(norm_angle, num_bins);

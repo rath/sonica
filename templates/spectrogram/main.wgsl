@@ -99,7 +99,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     // Trail: fade based on distance from cursor
-    let trail_length = 0.3;
+    let trail_length = 0.3 / PARAM_SCROLL_SPEED;
     let behind = col_pos - uv.x;
     if behind > 0.0 && behind < trail_length {
         let fade = 1.0 - behind / trail_length;

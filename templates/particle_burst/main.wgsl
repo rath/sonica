@@ -73,7 +73,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     p.x *= aspect;
 
     var color = vec3<f32>(0.01, 0.01, 0.02);
-    let particle_count = 200;
+    let particle_count = PARAM_PARTICLE_COUNT;
 
     for (var i = 0; i < particle_count; i++) {
         let seed = vec2<f32>(f32(i) * 0.37, f32(i) * 0.73);
@@ -108,8 +108,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let size = (0.003 + rnd.y * 0.004) * (0.5 + fade * 0.5);
         let brightness = smoothstep(size, 0.0, d) * fade * fade;
 
-        // Color: varies per particle
-        let hue = fract(rnd.x * 0.6 + u.spectral_centroid * 0.3 + u.time * 0.05);
+        // Color: varies per particle, mode selects palette
+        var hue: f32;
+        if PARAM_COLOR_MODE == 1 {
+            hue = fract(0.6 + u.spectral_centroid * 0.1); // warm tones
+        } else if PARAM_COLOR_MODE == 2 {
+            hue = fract(rnd.x * 0.2 + 0.4); // cool tones
+        } else {
+            hue = fract(rnd.x * 0.6 + u.spectral_centroid * 0.3 + u.time * 0.05); // rainbow
+        }
         let particle_color = hsv2rgb(hue, 0.7 + rnd.y * 0.3, 1.0);
 
         color += particle_color * brightness * 0.8;

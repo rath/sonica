@@ -83,7 +83,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let dist = abs(uv.y - wave_y);
 
     // Line thickness based on RMS
-    let base_thickness = 2.0 / u.resolution.y;
+    let base_thickness = PARAM_LINE_THICKNESS / u.resolution.y;
     let thickness = base_thickness * (1.0 + u.rms * 2.0);
 
     // Main line
@@ -91,7 +91,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     // Glow
     let glow_size = thickness * 8.0;
-    let glow = exp(-dist * dist / (glow_size * glow_size)) * 0.6;
+    let glow = exp(-dist * dist / (glow_size * glow_size)) * PARAM_GLOW_INTENSITY;
 
     // Color based on spectral centroid (hue shift)
     let hue = 0.45 + u.spectral_centroid * 0.3;
