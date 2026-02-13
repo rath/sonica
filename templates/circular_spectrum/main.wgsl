@@ -81,11 +81,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let norm_angle = (angle + PI) / TWO_PI; // 0..1
 
     // Inner radius with beat pulse
-    let inner_r = 0.15 + u.beat_intensity * 0.03;
+    let inner_r = 0.15 + u.beat_intensity * 0.06;
 
     // Sample FFT at this angle
     let fft_val = sample_fft_log(norm_angle, num_bins);
-    let bar_height = pow(fft_val, 0.7) * 0.25 * (1.0 + u.rms * 0.5);
+    let bar_height = pow(fft_val, 0.6) * 0.35 * (1.0 + u.rms * 1.0);
     let outer_r = inner_r + bar_height;
 
     // Background
@@ -109,8 +109,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     }
 
     // Outer glow for bars
-    if dist > outer_r && dist < outer_r + 0.02 {
-        let glow_t = 1.0 - (dist - outer_r) / 0.02;
+    if dist > outer_r && dist < outer_r + 0.04 {
+        let glow_t = 1.0 - (dist - outer_r) / 0.04;
         let hue = norm_angle * 0.8 + 0.5 + u.time * 0.02;
         let glow_c = hsv2rgb(hue % 1.0, 0.6, 0.8);
         color += glow_c * glow_t * glow_t * fft_val;
