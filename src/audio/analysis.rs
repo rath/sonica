@@ -8,7 +8,7 @@ use super::features::{FrameFeatures, GlobalAnalysis, SmoothedFrame};
 const FFT_SIZE: usize = 2048;
 const HOP_SIZE: usize = 1024;
 
-pub fn analyze(audio: &AudioData, fps: u32) -> Result<(GlobalAnalysis, Vec<SmoothedFrame>)> {
+pub fn analyze(audio: &AudioData, fps: u32, smoothing: f32) -> Result<(GlobalAnalysis, Vec<SmoothedFrame>)> {
     let samples = &audio.samples;
     let sr = audio.sample_rate;
     let duration = samples.len() as f32 / sr as f32;
@@ -20,8 +20,8 @@ pub fn analyze(audio: &AudioData, fps: u32) -> Result<(GlobalAnalysis, Vec<Smoot
     log::info!("Pass 2: Per-frame FFT ({} frames)...", total_frames);
     let raw_frames = pass2_per_frame(samples, sr, fps, total_frames);
 
-    log::info!("Pass 3: Smoothing & normalization...");
-    let smoothed = pass3_smooth(&raw_frames, &global, fps, duration);
+    log::info!("Pass 3: Smoothing & normalization (smoothing={:.2})...", smoothing);
+    let smoothed = pass3_smooth(&raw_frames, &global, fps, duration, smoothing);
 
     Ok((global, smoothed))
 }
@@ -262,6 +262,7 @@ fn pass3_smooth(
     global: &GlobalAnalysis,
     fps: u32,
     _duration: f32,
+    smoothing: f32,
 ) -> Vec<SmoothedFrame> {
     if raw.is_empty() {
         return Vec::new();
@@ -300,7 +301,7 @@ fn pass3_smooth(
     }
 
     // Bidirectional EMA smoothing
-    let alpha = 0.15; // smoothing factor
+    let alpha = 1.0 - smoothing; // smoothing=0.85 → alpha=0.15 (default behavior)
 
     // Forward pass
     let mut forward_bins: Vec<Vec<f32>> = vec![vec![0.0; num_bins]; n];

@@ -92,7 +92,10 @@ Options:
       --height <PX>          Video height [default: 1080]
       --fps <N>              Frames per second [default: 30]
       --crf <N>              H.264 quality, 0-51, lower=better [default: 18]
-      --effects <LIST>       Post-processing effects, comma-separated
+      --effects <LIST>       Post-processing effects, comma-separated (use "none" to disable)
+      --smoothing <F>        Audio smoothing factor, 0.0-1.0 [default: 0.85]
+      --title <TEXT>         Title text overlay (bottom center)
+      --show-time            Show elapsed time overlay (bottom right)
       --codec <NAME>         FFmpeg video codec [default: libx264]
       --pix-fmt <FMT>        FFmpeg pixel format [default: yuv420p]
       --list-templates       List available templates and exit

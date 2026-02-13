@@ -19,6 +19,7 @@ indicatif = "0.17"
 anyhow = "1"
 thiserror = "2"
 rayon = "1"
+fontdue = "0.9"
 
 [profile.release]
 opt-level = 3

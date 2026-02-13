@@ -17,6 +17,7 @@ use render::gpu::GpuContext;
 use render::pipeline::{FrameUniforms, RenderPipeline};
 use render::frame::{FrameRenderer, TEXTURE_FORMAT};
 use render::postprocess::PostProcessChain;
+use render::text::TextOverlay;
 use encode::ffmpeg::FfmpegEncoder;
 use audio::features::SmoothedFrame;
 use templates::loader;
@@ -67,7 +68,7 @@ fn main() -> Result<()> {
 
     // 2. Analyze audio (3-pass pipeline)
     log::info!("Analyzing audio...");
-    let (global, frames) = audio::analysis::analyze(&audio_data, cli.fps)?;
+    let (global, frames) = audio::analysis::analyze(&audio_data, cli.fps, cli.smoothing)?;
 
     let total_frames = frames.len();
     log::info!("Total frames: {}, Duration: {:.1}s", total_frames, global.duration);
@@ -192,7 +193,15 @@ fn main() -> Result<()> {
         cli.bitrate.as_deref(),
     )?;
 
-    // 8. Render loop
+    // 8. Text overlay
+    let text_overlay = if cli.title.is_some() || cli.show_time {
+        let font_size = (cli.height as f32 * 0.03).max(16.0);
+        Some(TextOverlay::new(font_size))
+    } else {
+        None
+    };
+
+    // 9. Render loop
     let pb = ProgressBar::new(total_frames as u64);
     pb.set_style(
         ProgressStyle::default_bar()
@@ -220,7 +229,7 @@ fn main() -> Result<()> {
         gpu.queue.write_buffer(&waveform_buffer, 0, bytemuck::cast_slice(&frame.waveform));
 
         // Render
-        let pixels = if pp_chain.has_effects() {
+        let mut pixels = if pp_chain.has_effects() {
             frame_renderer.render_and_readback(&gpu, &slot.pipeline.pipeline, &slot.bind_group)?;
             let final_texture = pp_chain.run(
                 &gpu.device,
@@ -233,13 +242,39 @@ fn main() -> Result<()> {
             frame_renderer.render_and_readback(&gpu, &slot.pipeline.pipeline, &slot.bind_group)?
         };
 
+        // Text overlay compositing
+        if let Some(ref overlay) = text_overlay {
+            let color = [255u8, 255, 255, 220];
+            let margin = (cli.height as f32 * 0.03) as u32;
+
+            if let Some(ref title) = cli.title {
+                let tw = overlay.measure_width(title);
+                let tx = cli.width.saturating_sub(tw) / 2;
+                let ty = cli.height - margin - overlay.measure_width("M"); // approximate line height
+                overlay.composite(&mut pixels, cli.width, cli.height, title, tx, ty, color);
+            }
+
+            if cli.show_time {
+                let total_secs = frame.time as u64;
+                let time_str = if total_secs >= 3600 {
+                    format!("{:02}:{:02}:{:02}", total_secs / 3600, (total_secs % 3600) / 60, total_secs % 60)
+                } else {
+                    format!("{:02}:{:02}", total_secs / 60, total_secs % 60)
+                };
+                let tw = overlay.measure_width(&time_str);
+                let tx = cli.width - margin - tw;
+                let ty = cli.height - margin - overlay.measure_width("M");
+                overlay.composite(&mut pixels, cli.width, cli.height, &time_str, tx, ty, color);
+            }
+        }
+
         encoder.write_frame(&pixels)?;
         pb.set_position(frame_idx as u64 + 1);
     }
 
     pb.finish_with_message("Rendering complete");
 
-    // 9. Finish encoding
+    // 10. Finish encoding
     log::info!("Finishing encoding...");
     encoder.finish()?;
 
