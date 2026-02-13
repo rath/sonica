@@ -2,7 +2,7 @@
 
 GPU-accelerated audio visualizer video generator.
 
-Takes an audio file, runs FFT analysis, renders visualizations with GPU shaders, and outputs an MP4 video with the original audio.
+Takes an audio file, runs FFT analysis, renders visualizations with GPU shaders, and outputs an MP4 video with the original audio. Any resolution, any aspect ratio — landscape, portrait, square.
 
 ## Requirements
 
@@ -42,6 +42,12 @@ sonica audio.wav -t all --effects crt
 
 # CRT retro style
 sonica audio.wav --effects crt
+
+# Portrait video for Instagram/TikTok (9:16)
+sonica audio.wav -t circular_spectrum --width 1080 --height 1920
+
+# Square video for Instagram feed (1:1)
+sonica audio.wav -t particle_burst --width 1080 --height 1080
 
 # 4K 60fps high quality
 sonica track.flac -t kaleidoscope --width 3840 --height 2160 --fps 60 --crf 12
