@@ -27,7 +27,6 @@ struct TemplateSlot {
     bind_group: wgpu::BindGroup,
     compute_pipeline: Option<ComputePipelineWrapper>,
     name: String,
-    start_frame: usize,
     end_frame: usize,
 }
 
@@ -213,7 +212,6 @@ fn main() -> Result<()> {
             bind_group,
             compute_pipeline,
             name: tmpl.manifest.display_name.clone(),
-            start_frame,
             end_frame,
         });
     }
@@ -301,7 +299,7 @@ fn main() -> Result<()> {
             if let Some(ref title) = cli.title {
                 let tw = overlay.measure_width(title);
                 let tx = cli.width.saturating_sub(tw) / 2;
-                let ty = cli.height - margin - overlay.measure_width("M"); // approximate line height
+                let ty = cli.height - margin - overlay.line_height();
                 overlay.composite(&mut pixels, cli.width, cli.height, title, tx, ty, color);
             }
 
@@ -314,7 +312,7 @@ fn main() -> Result<()> {
                 };
                 let tw = overlay.measure_width(&time_str);
                 let tx = cli.width - margin - tw;
-                let ty = cli.height - margin - overlay.measure_width("M");
+                let ty = cli.height - margin - overlay.line_height();
                 overlay.composite(&mut pixels, cli.width, cli.height, &time_str, tx, ty, color);
             }
         }

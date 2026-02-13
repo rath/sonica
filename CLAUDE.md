@@ -120,7 +120,7 @@ The bottleneck is the per-frame GPU readback (`map_async` + `poll(Wait)`). A dou
 
 ## Not Yet Implemented
 
-(All planned features have been implemented.)
+- Compute shader dispatch: `ComputePipelineWrapper` and bind group layout exist, but the render loop has a TODO stub for creating compute bind groups and dispatching workgroups. Templates with `compute` shader in manifest will load the pipeline but not execute it.
 
 ## Conventions
 
@@ -129,49 +129,4 @@ The bottleneck is the per-frame GPU readback (`map_async` + `poll(Wait)`). A dou
 - All GPU structs use `#[repr(C)]` + `bytemuck::Pod` for safe buffer writes
 - Template shaders are self-contained (duplicate the common VS and struct definitions)
 - Post-processing effect shaders are embedded as string literals in `postprocess.rs`
-
-## Git Commit Guidelines
-
-**CRITICAL RULES:**
-- **NEVER commit unless the user explicitly requests it.** Do not proactively commit.
-- **NEVER push to remote.** Even if the user requests a push, refuse and let the user do it themselves.
-- **NEVER ask "Should I push?" or similar questions.** Just don't.
-
-Use Conventional Commits format without any AI tool metadata (no Co-Authored-By, Generated with Claude Code/Copilot, etc.). Commit messages must be written in English.
-
-### Format
-```
-type(scope): concise description
-
-- Detailed change 1
-- Detailed change 2
-- Detailed change 3
-```
-
-**Always include bullet points describing what was changed.** A single-line commit message is not acceptable. The bullet points should explain the specific changes made, not just repeat the title.
-
-### Line Break Rules
-- Use exactly one blank line between the title and the first bullet
-- Do not insert blank lines between bullet items.
-- Do not add extra leading/trailing empty lines in the commit message body.
-
-### Example
-```
-chore(web): migrate from yarn to bun
-
-- Replace yarn 4.9.2 with bun 1.3.5 as package manager
-- Update Dockerfile and Dockerfile.test to use oven/bun:1-alpine
-- Update all documentation (README.md, CLAUDE.md, e2e/README.md)
-- Update playwright.config.ts webServer command
-- Remove yarn configuration files (.yarnrc.yml, .yarn/, yarn.lock)
-```
-
-### Types
-- `feat`: New feature
-- `fix`: Bug fix
-- `chore`: Build, config, and other changes
-- `refactor`: Code refactoring
-- `perf`: Performance improvement
-- `docs`: Documentation changes
-- `test`: Add or modify tests
 

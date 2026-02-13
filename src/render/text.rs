@@ -62,6 +62,12 @@ impl TextOverlay {
         }
     }
 
+    /// Measure the line height based on a capital letter glyph.
+    pub fn line_height(&self) -> u32 {
+        let (metrics, _) = self.font.rasterize('M', self.font_size);
+        metrics.height as u32
+    }
+
     /// Measure the width of rendered text in pixels.
     pub fn measure_width(&self, text: &str) -> u32 {
         let mut width = 0.0f32;

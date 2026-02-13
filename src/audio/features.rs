@@ -1,4 +1,3 @@
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct FrameFeatures {
     /// FFT magnitude bins (N/2 elements, linear scale)
@@ -16,6 +15,7 @@ pub struct FrameFeatures {
     /// Spectral centroid (Hz)
     pub spectral_centroid: f32,
     /// Spectral flux (change from previous frame)
+    #[allow(dead_code)]
     pub spectral_flux: f32,
     /// Raw waveform samples for this frame
     pub waveform: Vec<f32>,
@@ -48,14 +48,17 @@ pub struct SmoothedFrame {
     pub time: f32,
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct GlobalAnalysis {
+    #[allow(dead_code)]
     pub sample_rate: u32,
+    #[allow(dead_code)]
     pub total_samples: usize,
     pub duration: f32,
     pub peak_rms: f32,
+    #[allow(dead_code)]
     pub peak_amplitude: f32,
     pub beat_times: Vec<f32>,
+    #[allow(dead_code)]
     pub tempo_bpm: f32,
 }

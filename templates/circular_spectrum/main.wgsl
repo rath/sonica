@@ -83,9 +83,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     // Inner radius with beat pulse
     let inner_r = PARAM_INNER_RADIUS + u.beat_intensity * 0.06;
 
-    // Sample FFT at this angle
-    let fft_val = sample_fft_log(norm_angle, num_bins);
-    let bar_height = pow(fft_val, 0.6) * 0.35 * (1.0 + u.rms * 1.0);
+    // Sample FFT at this angle (quantized to segments)
+    let seg = floor(norm_angle * f32(PARAM_SEGMENTS));
+    let seg_center = (seg + 0.5) / f32(PARAM_SEGMENTS);
+    let fft_val = sample_fft_log(seg_center, num_bins);
+
+    // Segment edge fade for visual gap between segments
+    let seg_frac = fract(norm_angle * f32(PARAM_SEGMENTS));
+    let seg_edge = smoothstep(0.0, 0.08, seg_frac) * smoothstep(1.0, 0.92, seg_frac);
+
+    let bar_height = pow(fft_val, 0.6) * 0.35 * (1.0 + u.rms * 1.0) * seg_edge;
     let outer_r = inner_r + bar_height;
 
     // Background

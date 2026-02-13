@@ -142,9 +142,10 @@ impl RenderPipeline {
     }
 }
 
-#[allow(dead_code)]
 pub struct ComputePipelineWrapper {
+    #[allow(dead_code)]
     pub pipeline: wgpu::ComputePipeline,
+    #[allow(dead_code)]
     pub bind_group_layout: wgpu::BindGroupLayout,
 }
 

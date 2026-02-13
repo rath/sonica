@@ -58,6 +58,33 @@ fn inferno(t: f32) -> vec3<f32> {
     }
 }
 
+// Viridis-like colormap
+fn viridis(t: f32) -> vec3<f32> {
+    let t_c = clamp(t, 0.0, 1.0);
+    if t_c < 0.25 {
+        let s = t_c * 4.0;
+        return vec3<f32>(0.267 + s * 0.01, 0.004 + s * 0.22, 0.329 + s * 0.14);
+    } else if t_c < 0.5 {
+        let s = (t_c - 0.25) * 4.0;
+        return vec3<f32>(0.277 - s * 0.1, 0.224 + s * 0.22, 0.469 - s * 0.05);
+    } else if t_c < 0.75 {
+        let s = (t_c - 0.5) * 4.0;
+        return vec3<f32>(0.177 + s * 0.35, 0.444 + s * 0.18, 0.419 - s * 0.14);
+    } else {
+        let s = (t_c - 0.75) * 4.0;
+        return vec3<f32>(0.527 + s * 0.47, 0.624 + s * 0.22, 0.279 - s * 0.12);
+    }
+}
+
+fn colormap(t: f32) -> vec3<f32> {
+    if PARAM_COLOR_SCHEME == 1 {
+        return viridis(t);
+    } else if PARAM_COLOR_SCHEME == 2 {
+        return vec3<f32>(clamp(t, 0.0, 1.0));
+    }
+    return inferno(t);
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let uv = in.uv;
@@ -94,7 +121,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if dist_from_cursor < column_width {
         // Current column
         let intensity = pow(fft_val, 0.6);
-        let color = inferno(intensity);
+        let color = colormap(intensity);
         return vec4<f32>(color, 1.0);
     }
 
@@ -104,7 +131,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     if behind > 0.0 && behind < trail_length {
         let fade = 1.0 - behind / trail_length;
         let trail_intensity = pow(fft_val, 0.6) * fade * fade;
-        let color = inferno(trail_intensity) * fade;
+        let color = colormap(trail_intensity) * fade;
         return vec4<f32>(color, 1.0);
     }
 

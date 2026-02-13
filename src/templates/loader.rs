@@ -197,7 +197,7 @@ pub fn inject_params(
             }
             "color" => {
                 let (r, g, b) = if let Some(v) = value {
-                    // Parse "r,g,b" or "#rrggbb"
+                    // Parse "r:g:b" (colon-delimited, since comma is the CLI value_delimiter)
                     let parts: Vec<f64> = v.split(':').filter_map(|s| s.parse().ok()).collect();
                     if parts.len() >= 3 {
                         (parts[0], parts[1], parts[2])

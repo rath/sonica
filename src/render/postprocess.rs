@@ -12,12 +12,12 @@ pub struct PostProcessUniforms {
     pub intensity: f32,
 }
 
-#[allow(dead_code)]
 pub struct PostProcessPass {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     uniform_buffer: wgpu::Buffer,
+    #[allow(dead_code)]
     name: String,
 }
 
