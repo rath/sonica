@@ -2,7 +2,7 @@
 
 ## Overview
 
-Sonica is a GPU-accelerated audio visualizer that generates MP4 videos from audio files. It uses Rust + wgpu (Metal backend on macOS) for headless GPU rendering and pipes raw RGBA frames to ffmpeg for encoding.
+Sonica is a GPU-accelerated audio visualizer that generates MP4 videos from audio files. It uses Rust + wgpu (Metal backend on macOS) for headless GPU rendering and pipes raw RGBA frames to ffmpeg for encoding. README demo videos are hosted via GitHub Issue #1.
 
 ## Architecture
 
