@@ -17,31 +17,36 @@ impl FfmpegEncoder {
         codec: &str,
         pix_fmt: &str,
         crf: u32,
+        bitrate: Option<&str>,
     ) -> Result<Self> {
+        let mut args = vec![
+            "-y".to_string(),
+            "-f".into(), "rawvideo".into(),
+            "-pixel_format".into(), "rgba".into(),
+            "-video_size".into(), format!("{}x{}", width, height),
+            "-framerate".into(), fps.to_string(),
+            "-i".into(), "pipe:0".into(),
+            "-i".into(), input_audio.to_str().unwrap().to_string(),
+            "-c:v".into(), codec.to_string(),
+            "-pix_fmt".into(), pix_fmt.to_string(),
+        ];
+
+        if let Some(br) = bitrate {
+            args.extend(["-b:v".to_string(), br.to_string()]);
+        } else {
+            args.extend(["-crf".to_string(), crf.to_string()]);
+            args.extend(["-preset".to_string(), "medium".to_string()]);
+        }
+
+        args.extend([
+            "-c:a".into(), "aac".into(),
+            "-b:a".into(), "192k".into(),
+            "-shortest".into(),
+            output_path.to_str().unwrap().to_string(),
+        ]);
+
         let child = Command::new("ffmpeg")
-            .args([
-                "-y",
-                // Video input: raw RGBA from stdin
-                "-f", "rawvideo",
-                "-pixel_format", "rgba",
-                "-video_size", &format!("{}x{}", width, height),
-                "-framerate", &fps.to_string(),
-                "-i", "pipe:0",
-                // Audio input
-                "-i", input_audio.to_str().unwrap(),
-                // Video encoding
-                "-c:v", codec,
-                "-pix_fmt", pix_fmt,
-                "-crf", &crf.to_string(),
-                "-preset", "medium",
-                // Audio encoding
-                "-c:a", "aac",
-                "-b:a", "192k",
-                // Sync: use shorter stream
-                "-shortest",
-                // Output
-                output_path.to_str().unwrap(),
-            ])
+            .args(&args)
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())

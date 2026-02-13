@@ -27,9 +27,13 @@ pub struct Cli {
     #[arg(long, default_value_t = 30)]
     pub fps: u32,
 
-    /// H.264 CRF quality (0-51, lower = better)
+    /// H.264 CRF quality (0-51, lower = better). Ignored when --bitrate is set.
     #[arg(long, default_value_t = 18)]
     pub crf: u32,
+
+    /// Video bitrate (e.g. 2400k, 5M). When set, uses -b:v instead of -crf.
+    #[arg(short, long)]
+    pub bitrate: Option<String>,
 
     /// Post-processing effects (comma-separated or preset name)
     #[arg(long, value_delimiter = ',')]

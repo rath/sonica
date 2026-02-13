@@ -143,6 +143,7 @@ fn main() -> Result<()> {
         &cli.codec,
         &cli.pix_fmt,
         cli.crf,
+        cli.bitrate.as_deref(),
     )?;
 
     // 8. Render loop
