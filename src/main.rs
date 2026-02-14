@@ -134,8 +134,15 @@ fn main() -> Result<()> {
             cli.subtitle_lang.as_deref(),
         )?;
         let words = transcriber.transcribe(&audio_data.samples, audio_data.sample_rate)?;
+        log::info!("Whisper returned {} word segments:", words.len());
+        for (i, w) in words.iter().enumerate() {
+            log::info!("  [{:3}] {:.2}s - {:.2}s  {:?}", i, w.start_time, w.end_time, w.text);
+        }
         let cues = subtitle::cue::group_words(words, cli.subtitle_max_chars);
-        log::info!("Transcribed {} subtitle cues", cues.len());
+        log::info!("Grouped into {} subtitle cues:", cues.len());
+        for (i, c) in cues.iter().enumerate() {
+            log::info!("  [{:3}] {:.2}s - {:.2}s  {:?}", i, c.start_time, c.end_time, c.text);
+        }
         Some(cues)
     } else {
         None

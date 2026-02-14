@@ -166,6 +166,12 @@ impl TextOverlay {
         let mut fallback: Option<(Metrics, Vec<u8>)> = None;
 
         for font in &self.fonts {
+            // Check if the font actually has a glyph for this character
+            // (not just a .notdef placeholder box)
+            if font.lookup_glyph_index(ch) == 0 {
+                continue;
+            }
+
             let (metrics, bitmap) = font.rasterize(ch, self.font_size);
             if metrics.width > 0 && metrics.height > 0 && !bitmap.is_empty() {
                 return (metrics, bitmap);
@@ -176,7 +182,8 @@ impl TextOverlay {
             }
         }
 
-        fallback.unwrap_or_else(|| self.fonts[0].rasterize(ch, self.font_size))
+        // No font has a real glyph — return whatever the last font produces
+        fallback.unwrap_or_else(|| self.fonts.last().unwrap().rasterize(ch, self.font_size))
     }
 }
 
@@ -669,7 +676,8 @@ fn find_system_font() -> Option<PathBuf> {
     const CANDIDATE_FONTS: &[&str] = &[
         // macOS
         "/System/Library/Fonts/Supplemental/NotoSansCJK-Regular.ttc",
-        "/System/Library/Fonts/Apple SD Gothic Neo.ttc",
+        "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+        "/System/Library/Fonts/Supplemental/AppleGothic.ttf",
         "/Library/Fonts/NotoSansKR-Regular.otf",
         // Linux
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
