@@ -19,13 +19,22 @@ cargo install --git https://github.com/rath/sonica
 
 All templates and shaders are embedded in the binary, so no additional files are needed.
 
+### With subtitle support
+
+```bash
+cargo install --git https://github.com/rath/sonica --features subtitles
+```
+
+This adds speech-to-text subtitle overlay via [whisper.cpp](https://github.com/ggerganov/whisper.cpp). Whisper models are automatically downloaded on first use.
+
 ### Build from source
 
 ```bash
 git clone https://github.com/rath/sonica
 cd sonica
 cargo build --release
-# binary at target/release/sonica
+# Or with subtitle support:
+cargo build --release --features subtitles
 ```
 
 ## Usage
@@ -63,6 +72,15 @@ sonica audio.wav --title "안녕하세요" --font-url "https://raw.githubusercon
 
 # 로컬 폰트 파일 경로 예시 (macOS)
 sonica audio.wav --title "안녕하세요" --font "/System/Library/Fonts/Supplemental/NotoSansCJK-Regular.ttc"
+
+# Speech-to-text subtitles (requires --features subtitles)
+sonica audio.wav -o output.mp4 --subtitles
+
+# Subtitles with specific language and model
+sonica audio.wav -o output.mp4 --subtitles --whisper-model small --subtitle-lang ko
+
+# Customize subtitle appearance
+sonica audio.wav -o output.mp4 --subtitles --subtitle-font-size 64 --subtitle-max-chars 30
 
 # List available templates
 sonica --list-templates
@@ -114,6 +132,25 @@ Available effects: `bloom`, `chromatic_aberration`, `vignette`, `film_grain`, `c
 
 When `--effects` is not specified, each template uses its own default effects.
 
+## Subtitles
+
+Speech-to-text subtitle overlay using local [whisper.cpp](https://github.com/ggerganov/whisper.cpp) inference. Requires building with `--features subtitles`.
+
+```bash
+# Auto-detect language, base model (downloaded automatically)
+sonica audio.wav --subtitles
+
+# Korean speech with small model for better accuracy
+sonica audio.wav --subtitles --whisper-model small --subtitle-lang ko
+
+# Use a local model file
+sonica audio.wav --subtitles --whisper-model /path/to/ggml-large-v3-turbo.bin
+```
+
+Available models: `tiny`, `base`, `small`, `medium`, `large` (and `.en` English-only variants). Models are cached at `~/.cache/sonica/models/` after first download.
+
+Subtitles are rendered with a semi-transparent black background at the bottom center of the video. Font size and line wrapping can be adjusted with `--subtitle-font-size` and `--subtitle-max-chars`.
+
 ## CLI Reference
 
 ```
@@ -141,6 +178,11 @@ Options:
       --codec <NAME>         FFmpeg video codec [default: libx264]
       --pix-fmt <FMT>        FFmpeg pixel format [default: yuv420p]
       --list-templates       List available templates and exit
+      --subtitles            Enable speech-to-text subtitles (requires --features subtitles)
+      --whisper-model <M>    Whisper model name or file path [default: base]
+      --subtitle-lang <L>    Subtitle language, ISO 639-1 (e.g. "en", "ko"). Auto-detect if omitted
+      --subtitle-font-size <PX>  Subtitle font size [default: 48]
+      --subtitle-max-chars <N>   Max characters per subtitle line [default: 42]
   -h, --help                 Print help
 ```
 
@@ -187,6 +229,12 @@ font_url = "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/Subse
 smoothing = 0.9
 
 effects = ["bloom", "vignette"]
+
+[subtitle]
+whisper_model = "base"
+language = "ko"
+font_size = 48.0
+max_chars_per_line = 42
 ```
 
 For Korean text, use a font that includes CJK glyphs (for example `NotoSansKR-Regular.otf` from Google Fonts) via `--font`, `--font-url`, or `font` / `font_url` in the config.
@@ -198,13 +246,15 @@ WAV, MP3, FLAC, OGG/Vorbis, AAC — via [symphonia](https://github.com/pdeljanov
 ## How It Works
 
 1. **Decode** audio to mono PCM samples
-2. **Analyze** in 3 passes:
+2. **Transcribe** speech to timed subtitles via whisper.cpp (optional)
+3. **Analyze** in 3 passes:
    - Global stats (peak levels, beat detection, tempo)
    - Per-frame FFT with frequency band extraction (parallelized)
    - Bidirectional smoothing and normalization
-3. **Render** each frame on GPU via wgpu (Metal/Vulkan) with WGSL shaders
-4. **Post-process** through a chain of effect shaders
-5. **Encode** by piping raw RGBA frames to ffmpeg
+4. **Render** each frame on GPU via wgpu (Metal/Vulkan) with WGSL shaders
+5. **Post-process** through a chain of effect shaders
+6. **Overlay** title, time, and subtitles on CPU
+7. **Encode** by piping raw RGBA frames to ffmpeg
 
 ## Performance
 

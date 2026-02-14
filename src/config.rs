@@ -9,6 +9,8 @@ pub struct Config {
     pub audio: AudioConfig,
     #[serde(default)]
     pub effects: Vec<String>,
+    #[serde(default)]
+    pub subtitle: SubtitleConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -61,6 +63,32 @@ fn default_fps() -> u32 { 30 }
 fn default_crf() -> u32 { 18 }
 fn default_codec() -> String { "libx264".into() }
 fn default_smoothing() -> f32 { 0.85 }
+
+#[derive(Debug, Deserialize)]
+pub struct SubtitleConfig {
+    #[serde(default = "default_whisper_model")]
+    pub whisper_model: String,
+    pub language: Option<String>,
+    #[serde(default = "default_subtitle_font_size")]
+    pub font_size: f32,
+    #[serde(default = "default_subtitle_max_chars")]
+    pub max_chars_per_line: usize,
+}
+
+impl Default for SubtitleConfig {
+    fn default() -> Self {
+        Self {
+            whisper_model: default_whisper_model(),
+            language: None,
+            font_size: default_subtitle_font_size(),
+            max_chars_per_line: default_subtitle_max_chars(),
+        }
+    }
+}
+
+fn default_whisper_model() -> String { "base".into() }
+fn default_subtitle_font_size() -> f32 { 48.0 }
+fn default_subtitle_max_chars() -> usize { 42 }
 
 pub fn load_config(path: &PathBuf) -> Option<Config> {
     let content = std::fs::read_to_string(path).ok()?;

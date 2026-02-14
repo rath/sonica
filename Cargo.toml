@@ -23,6 +23,13 @@ rayon = "1"
 fontdue = "0.9"
 zip = "0.6"
 dirs = "6.0.0"
+whisper-rs = { version = "0.15", optional = true }
+rubato = { version = "0.16", optional = true }
+hf-hub = { version = "0.4", optional = true }
+
+[features]
+default = []
+subtitles = ["whisper-rs", "rubato", "hf-hub"]
 
 [profile.release]
 opt-level = 3

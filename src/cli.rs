@@ -78,4 +78,24 @@ pub struct Cli {
     /// FFmpeg pixel format
     #[arg(long, default_value = "yuv420p")]
     pub pix_fmt: String,
+
+    /// Enable subtitle generation via speech recognition (requires --features subtitles)
+    #[arg(long)]
+    pub subtitles: bool,
+
+    /// Whisper model: file path or model name (tiny/base/small/medium/large)
+    #[arg(long, default_value = "base")]
+    pub whisper_model: String,
+
+    /// Subtitle language (ISO 639-1, e.g. "en", "ko"). Auto-detect if not set.
+    #[arg(long)]
+    pub subtitle_lang: Option<String>,
+
+    /// Subtitle font size in pixels
+    #[arg(long, default_value_t = 48.0)]
+    pub subtitle_font_size: f32,
+
+    /// Maximum characters per subtitle line
+    #[arg(long, default_value_t = 42)]
+    pub subtitle_max_chars: usize,
 }

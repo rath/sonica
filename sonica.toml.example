@@ -35,11 +35,30 @@ smoothing = 0.85
 # Set to ["none"] to disable all effects.
 effects = ["bloom", "vignette"]
 
+# Speech-to-text subtitle overlay (requires --features subtitles build)
+# Enable subtitles at runtime with the --subtitles CLI flag.
+[subtitle]
+# Whisper model name or file path (default: "base")
+# Names: "tiny", "base", "small", "medium", "large" (and ".en" variants)
+# Models are auto-downloaded to ~/.cache/sonica/models/ on first use.
+# whisper_model = "base"
+
+# Subtitle language, ISO 639-1 (e.g. "en", "ko", "ja")
+# Omit to let Whisper auto-detect the language.
+# language = "en"
+
+# Subtitle font size in pixels (default: 48.0)
+# font_size = 48.0
+
+# Maximum characters per subtitle line before wrapping (default: 42)
+# max_chars_per_line = 42
+
 # ---------------------------------------------------------------------------
 # The following options are CLI-only and cannot be set in this config file:
 #   --template (-t)    Template name or "all"
 #   --title            Title text overlay (top right)
 #   --show-time        Elapsed time overlay (bottom right)
+#   --subtitles        Enable subtitle generation
 #   --bitrate (-b)     Video bitrate (e.g. "2400k", "5M")
 #   --pix-fmt          FFmpeg pixel format (default: yuv420p)
 #   --param            Template parameter overrides (e.g. bar_count=128)

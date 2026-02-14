@@ -8,10 +8,13 @@ Sonica is a GPU-accelerated audio visualizer that generates MP4 videos from audi
 
 ```
 Audio File → symphonia decode → 3-pass analysis → Vec<SmoothedFrame>
+                              → whisper-rs transcribe → Vec<SubtitleCue> (optional, --features subtitles)
                                                         ↓
                               wgpu headless render (WGSL shaders)
                                                         ↓
                               post-process chain (ping-pong textures)
+                                                        ↓
+                              CPU readback → text overlay (title/time) → subtitle overlay
                                                         ↓
                               ffmpeg stdin pipe → MP4 output
 ```
@@ -41,6 +44,11 @@ Audio File → symphonia decode → 3-pass analysis → Vec<SmoothedFrame>
 | `src/templates/loader.rs` | Template loading: filesystem first, embedded fallback |
 | `src/templates/embedded.rs` | Compile-time embedded templates and shaders via `include_str!` |
 | `src/templates/manifest.rs` | `manifest.json` serde schema |
+| `src/subtitle/mod.rs` | Subtitle module (behind `subtitles` feature flag) |
+| `src/subtitle/transcribe.rs` | whisper-rs transcription, rubato 16kHz resampling |
+| `src/subtitle/cue.rs` | Word→phrase grouping by timing/punctuation/char limit |
+| `src/subtitle/model.rs` | Whisper model resolution and HuggingFace auto-download |
+| `src/subtitle/render.rs` | Subtitle rendering: cue lookup, text wrapping, background box |
 | `src/encode/ffmpeg.rs` | `FfmpegEncoder`: subprocess with piped stdin |
 
 ## Template System
@@ -102,16 +110,47 @@ When no `--effects` flag is given, the template's `default_effects` from `manife
 - Beat intensity: 1.0 on onset → exponential decay
 - Beat phase: 0.0–1.0 within current beat interval
 
+## Subtitle System (Optional Feature)
+
+Enabled via `--features subtitles`. Uses whisper.cpp (via whisper-rs) for local speech-to-text transcription.
+
+### Pipeline
+1. Decode audio → mono PCM samples (reused from audio analysis input)
+2. Resample to 16kHz if needed (rubato)
+3. Whisper transcription → word-level segments with timestamps
+4. Group words into subtitle cues by timing gaps (>500ms), punctuation, and max char limit
+5. Merge short cues (<800ms) with neighbors
+6. In render loop: binary search for active cue at each frame's timestamp
+7. Render text on semi-transparent black background, centered at bottom
+
+### Model Management
+- Known model names: `tiny`, `base`, `small`, `medium`, `large` (and `.en` variants)
+- Models cached at `~/.cache/sonica/models/`
+- Auto-downloaded from HuggingFace (`ggerganov/whisper.cpp`) on first use via `hf-hub`
+- Can also specify a direct file path to a ggml model
+
+### Key Structs
+- `WordSegment { text, start_time, end_time }` — whisper output
+- `SubtitleCue { text, start_time, end_time }` — grouped phrase/sentence
+- `SubtitleRenderer` — owns cues + TextOverlay, renders per-frame
+- `WhisperTranscriber` — wraps WhisperContext, handles resampling + transcription
+
 ## Build & Run
 
 ```bash
 # Install from git (templates are embedded in the binary)
 cargo install --git https://github.com/rath/sonica
 
+# With subtitle support
+cargo install --git https://github.com/rath/sonica --features subtitles
+
 # Or build from source
 cargo build --release
+cargo build --release --features subtitles
+
 ./target/release/sonica audio.wav -o output.mp4
 ./target/release/sonica audio.wav -t circular_spectrum --effects crt --width 1920 --height 1080
+./target/release/sonica audio.wav -o output.mp4 --subtitles --whisper-model base
 ```
 
 Requires `ffmpeg` in PATH.
@@ -136,4 +175,5 @@ The bottleneck is the per-frame GPU readback (`map_async` + `poll(Wait)`). A dou
 - All GPU structs use `#[repr(C)]` + `bytemuck::Pod` for safe buffer writes
 - Template shaders are self-contained (duplicate the common VS and struct definitions)
 - Post-processing effect shaders are embedded as string literals in `postprocess.rs`
+- Subtitle support is behind a Cargo feature flag (`subtitles`) to keep the default binary lean
 

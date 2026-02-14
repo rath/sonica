@@ -60,14 +60,15 @@ impl TextOverlay {
         y: u32,
         color: [u8; 4],
     ) {
-        let mut cursor_x = x as i32;
+        let mut cursor_x = x as f32;
         for ch in text.chars() {
             let (metrics, bitmap) = self.rasterize_with_fallback(ch);
             if metrics.width == 0 || metrics.height == 0 || bitmap.is_empty() {
-                cursor_x += metrics.advance_width as i32;
+                cursor_x += metrics.advance_width;
                 continue;
             }
 
+            let glyph_x = cursor_x.round() as i32;
             let glyph_y = y as i32 + self.font_size as i32 - metrics.height as i32 - metrics.ymin;
 
             for gy in 0..metrics.height {
@@ -77,7 +78,7 @@ impl TextOverlay {
                         continue;
                     }
 
-                    let px = cursor_x + gx as i32;
+                    let px = glyph_x + gx as i32;
                     let py = glyph_y + gy as i32;
 
                     if px < 0 || py < 0 || px >= width as i32 || py >= height as i32 {
@@ -98,8 +99,47 @@ impl TextOverlay {
                 }
             }
 
-            cursor_x += metrics.advance_width as i32;
+            cursor_x += metrics.advance_width;
         }
+    }
+
+    /// Fill a rectangle on the pixel buffer with the given RGBA color (alpha-blended).
+    #[cfg(feature = "subtitles")]
+    pub fn fill_rect(
+        pixels: &mut [u8],
+        width: u32,
+        height: u32,
+        rx: u32,
+        ry: u32,
+        rw: u32,
+        rh: u32,
+        color: [u8; 4],
+    ) {
+        let a = color[3] as f32 / 255.0;
+        if a == 0.0 {
+            return;
+        }
+        let inv_a = 1.0 - a;
+        let x_end = (rx + rw).min(width);
+        let y_end = (ry + rh).min(height);
+        for py in ry..y_end {
+            for px in rx..x_end {
+                let idx = ((py * width + px) * 4) as usize;
+                if idx + 3 >= pixels.len() {
+                    continue;
+                }
+                pixels[idx] = (color[0] as f32 * a + pixels[idx] as f32 * inv_a) as u8;
+                pixels[idx + 1] = (color[1] as f32 * a + pixels[idx + 1] as f32 * inv_a) as u8;
+                pixels[idx + 2] = (color[2] as f32 * a + pixels[idx + 2] as f32 * inv_a) as u8;
+                pixels[idx + 3] = ((color[3] as f32 * a + pixels[idx + 3] as f32 * inv_a) as u8).max(pixels[idx + 3]);
+            }
+        }
+    }
+
+    /// The font size used for rendering, in pixels.
+    #[cfg(feature = "subtitles")]
+    pub fn font_size(&self) -> f32 {
+        self.font_size
     }
 
     /// Measure the line height based on a capital letter glyph.
