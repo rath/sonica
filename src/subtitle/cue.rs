@@ -1,21 +1,23 @@
-use super::transcribe::WordSegment;
+use super::transcribe::TimedWord;
 
-/// A subtitle cue: a grouped phrase/sentence with timing.
+/// A subtitle cue: a grouped phrase/sentence with timing and per-word karaoke data.
 #[derive(Clone, Debug)]
 pub struct SubtitleCue {
     pub text: String,
     pub start_time: f32,
     pub end_time: f32,
+    pub words: Vec<TimedWord>,
 }
 
 /// Group word-level segments into subtitle cues based on timing gaps,
 /// punctuation boundaries, and maximum character count.
-pub fn group_words(words: Vec<WordSegment>, max_chars: usize) -> Vec<SubtitleCue> {
+pub fn group_words(words: Vec<TimedWord>, max_chars: usize) -> Vec<SubtitleCue> {
     if words.is_empty() {
         return Vec::new();
     }
 
     let mut cues: Vec<SubtitleCue> = Vec::new();
+    let mut current_words: Vec<TimedWord> = Vec::new();
     let mut current_text = String::new();
     let mut current_start = words[0].start_time;
     let mut current_end = words[0].end_time;
@@ -38,8 +40,10 @@ pub fn group_words(words: Vec<WordSegment>, max_chars: usize) -> Vec<SubtitleCue
                 text: current_text.clone(),
                 start_time: current_start,
                 end_time: current_end,
+                words: current_words.clone(),
             });
             current_text.clear();
+            current_words.clear();
             current_start = word.start_time;
         }
 
@@ -51,6 +55,7 @@ pub fn group_words(words: Vec<WordSegment>, max_chars: usize) -> Vec<SubtitleCue
             current_text.push_str(&word.text);
         }
         current_end = word.end_time;
+        current_words.push(word.clone());
     }
 
     // Flush remaining text
@@ -59,6 +64,7 @@ pub fn group_words(words: Vec<WordSegment>, max_chars: usize) -> Vec<SubtitleCue
             text: current_text,
             start_time: current_start,
             end_time: current_end,
+            words: current_words,
         });
     }
 
@@ -87,6 +93,7 @@ fn merge_short_cues(cues: &mut Vec<SubtitleCue>, min_duration: f32) {
             cues[i].text.push(' ');
             cues[i].text.push_str(&next.text);
             cues[i].end_time = next.end_time;
+            cues[i].words.extend(next.words);
             // Don't increment i — re-check the merged cue
         } else {
             i += 1;
@@ -98,8 +105,8 @@ fn merge_short_cues(cues: &mut Vec<SubtitleCue>, min_duration: f32) {
 mod tests {
     use super::*;
 
-    fn word(text: &str, start: f32, end: f32) -> WordSegment {
-        WordSegment {
+    fn word(text: &str, start: f32, end: f32) -> TimedWord {
+        TimedWord {
             text: text.to_string(),
             start_time: start,
             end_time: end,
@@ -119,8 +126,8 @@ mod tests {
         let cues = group_words(words, 12);
         assert!(cues.len() >= 2);
         for cue in &cues {
-            // After merging, some may exceed slightly but grouping should split
             assert!(!cue.text.is_empty());
+            assert!(!cue.words.is_empty());
         }
     }
 
@@ -135,7 +142,9 @@ mod tests {
         let cues = group_words(words, 100);
         assert_eq!(cues.len(), 2);
         assert_eq!(cues[0].text, "Hello world.");
+        assert_eq!(cues[0].words.len(), 2);
         assert_eq!(cues[1].text, "New sentence");
+        assert_eq!(cues[1].words.len(), 2);
     }
 
     #[test]
@@ -159,11 +168,27 @@ mod tests {
         let cues = group_words(words, 100);
         assert_eq!(cues.len(), 1);
         assert_eq!(cues[0].text, "Hi there");
+        assert_eq!(cues[0].words.len(), 2);
     }
 
     #[test]
     fn empty_input() {
         let cues = group_words(vec![], 42);
         assert!(cues.is_empty());
+    }
+
+    #[test]
+    fn words_preserve_timing() {
+        let words = vec![
+            word("one", 0.0, 0.5),
+            word("two", 0.6, 1.0),
+            word("three", 1.1, 1.8),
+        ];
+        let cues = group_words(words, 100);
+        assert_eq!(cues.len(), 1);
+        assert_eq!(cues[0].words.len(), 3);
+        assert_eq!(cues[0].words[0].text, "one");
+        assert_eq!(cues[0].words[1].start_time, 0.6);
+        assert_eq!(cues[0].words[2].text, "three");
     }
 }

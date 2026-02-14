@@ -103,6 +103,76 @@ impl TextOverlay {
         }
     }
 
+    /// Composite text onto an RGBA pixel buffer, clipping horizontally at `max_x`.
+    ///
+    /// Identical to `composite()` but pixels beyond `max_x` are not drawn.
+    /// Used for karaoke-style partial word highlighting.
+    #[cfg(feature = "subtitles")]
+    pub fn composite_clipped(
+        &self,
+        pixels: &mut [u8],
+        width: u32,
+        height: u32,
+        text: &str,
+        x: u32,
+        y: u32,
+        color: [u8; 4],
+        max_x: u32,
+    ) {
+        let mut cursor_x = x as f32;
+        for ch in text.chars() {
+            let (metrics, bitmap) = self.rasterize_with_fallback(ch);
+            if metrics.width == 0 || metrics.height == 0 || bitmap.is_empty() {
+                cursor_x += metrics.advance_width;
+                continue;
+            }
+
+            let glyph_x = cursor_x.round() as i32;
+
+            // Early exit: entire glyph is past the clip boundary
+            if glyph_x >= max_x as i32 {
+                break;
+            }
+
+            let glyph_y = y as i32 + self.font_size as i32 - metrics.height as i32 - metrics.ymin;
+
+            for gy in 0..metrics.height {
+                for gx in 0..metrics.width {
+                    let alpha = bitmap[gy * metrics.width + gx];
+                    if alpha == 0 {
+                        continue;
+                    }
+
+                    let px = glyph_x + gx as i32;
+                    let py = glyph_y + gy as i32;
+
+                    if px < 0 || py < 0 || px >= width as i32 || py >= height as i32 {
+                        continue;
+                    }
+
+                    // Clip at max_x
+                    if px >= max_x as i32 {
+                        continue;
+                    }
+
+                    let idx = ((py as u32 * width + px as u32) * 4) as usize;
+                    if idx + 3 >= pixels.len() {
+                        continue;
+                    }
+
+                    let a = alpha as f32 / 255.0 * (color[3] as f32 / 255.0);
+                    let inv_a = 1.0 - a;
+                    pixels[idx] = (color[0] as f32 * a + pixels[idx] as f32 * inv_a) as u8;
+                    pixels[idx + 1] = (color[1] as f32 * a + pixels[idx + 1] as f32 * inv_a) as u8;
+                    pixels[idx + 2] = (color[2] as f32 * a + pixels[idx + 2] as f32 * inv_a) as u8;
+                    pixels[idx + 3] = 255;
+                }
+            }
+
+            cursor_x += metrics.advance_width;
+        }
+    }
+
     /// Fill a rectangle on the pixel buffer with the given RGBA color (alpha-blended).
     #[cfg(feature = "subtitles")]
     pub fn fill_rect(
