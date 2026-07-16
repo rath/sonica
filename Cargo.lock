@@ -2421,6 +2421,7 @@ dependencies = [
  "symphonia",
  "thiserror 2.0.18",
  "toml",
+ "unicode-segmentation",
  "wgpu",
  "whisper-rs",
  "zip",
@@ -3000,6 +3001,12 @@ name = "unicode-ident"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "537dd038a89878be9b64dd4bd1b260315c1bb94f4d784956b81e27a088d9a09e"
+
+[[package]]
+name = "unicode-segmentation"
+version = "1.13.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c6f5d3c3b1bf09027a88a6bc961fc00497d651009560b5463668dc81b0fa87a8"
 
 [[package]]
 name = "unicode-width"

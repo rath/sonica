@@ -1,4 +1,9 @@
 use super::transcribe::TimedWord;
+use unicode_segmentation::UnicodeSegmentation;
+
+pub(super) fn character_count(text: &str) -> usize {
+    UnicodeSegmentation::graphemes(text, true).count()
+}
 
 /// A subtitle cue: a grouped phrase/sentence with timing and per-word karaoke data.
 #[derive(Clone, Debug)]
@@ -24,9 +29,9 @@ pub fn group_words(words: Vec<TimedWord>, max_chars: usize) -> Vec<SubtitleCue> 
 
     for word in &words {
         let would_be = if current_text.is_empty() {
-            word.text.len()
+            character_count(&word.text)
         } else {
-            current_text.len() + 1 + word.text.len()
+            character_count(&current_text) + 1 + character_count(&word.text)
         };
 
         let timing_gap = word.start_time - current_end;
@@ -129,6 +134,26 @@ mod tests {
             assert!(!cue.text.is_empty());
             assert!(!cue.words.is_empty());
         }
+    }
+
+    #[test]
+    fn groups_korean_by_grapheme_count() {
+        let words = vec![
+            word("암세포는", 0.0, 1.0),
+            word("미토콘드리아가", 1.0, 2.0),
+            word("손상되었기", 2.0, 3.0),
+        ];
+
+        let cues = group_words(words, 13);
+
+        assert_eq!(cues.len(), 2);
+        assert_eq!(cues[0].text, "암세포는 미토콘드리아가");
+        assert_eq!(cues[1].text, "손상되었기");
+    }
+
+    #[test]
+    fn counts_combining_sequence_as_one_character() {
+        assert_eq!(character_count("e\u{301}"), 1);
     }
 
     #[test]

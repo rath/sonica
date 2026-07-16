@@ -1,4 +1,4 @@
-use super::cue::SubtitleCue;
+use super::cue::{character_count, SubtitleCue};
 use crate::render::text::TextOverlay;
 
 pub struct SubtitleRenderer {
@@ -176,7 +176,7 @@ impl SubtitleRenderer {
         let mut current_len = 0usize;
 
         for word in &cue.words {
-            let word_len = word.text.len();
+            let word_len = character_count(&word.text);
             let would_be = if current_line.is_empty() {
                 word_len
             } else {
@@ -270,7 +270,7 @@ impl SubtitleRenderer {
 
 /// Wrap text into lines that fit within `max_chars`.
 fn wrap_text(text: &str, max_chars: usize) -> Vec<String> {
-    if text.len() <= max_chars {
+    if character_count(text) <= max_chars {
         return vec![text.to_string()];
     }
 
@@ -280,7 +280,7 @@ fn wrap_text(text: &str, max_chars: usize) -> Vec<String> {
     for word in text.split_whitespace() {
         if current_line.is_empty() {
             current_line.push_str(word);
-        } else if current_line.len() + 1 + word.len() > max_chars {
+        } else if character_count(&current_line) + 1 + character_count(word) > max_chars {
             lines.push(current_line.clone());
             current_line.clear();
             current_line.push_str(word);
@@ -315,6 +315,16 @@ mod tests {
         for line in &lines {
             assert!(line.len() <= 25);
         }
+    }
+
+    #[test]
+    fn wrap_korean_text_by_grapheme_count() {
+        let lines = wrap_text("암세포는 미토콘드리아가 손상되었기 때문에", 13);
+
+        assert_eq!(
+            lines,
+            vec!["암세포는 미토콘드리아가", "손상되었기 때문에"]
+        );
     }
 
     fn make_cue(text: &str, start: f32, end: f32, words: Vec<TimedWord>) -> SubtitleCue {
@@ -372,7 +382,36 @@ mod tests {
         assert!(lines.len() >= 2);
         for line in &lines {
             let text: String = line.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ");
-            assert!(text.len() <= 14); // slight slack for word boundaries
+            assert!(character_count(&text) <= 14); // slight slack for word boundaries
+        }
+    }
+
+    #[test]
+    fn split_korean_words_respects_max_characters() {
+        let cue = make_cue(
+            "암세포는 미토콘드리아가 손상되었기 때문에",
+            0.0,
+            4.0,
+            vec![
+                tw("암세포는", 0.0, 1.0),
+                tw("미토콘드리아가", 1.0, 2.0),
+                tw("손상되었기", 2.0, 3.0),
+                tw("때문에", 3.0, 4.0),
+            ],
+        );
+        let overlay = TextOverlay::new(24.0, None, None);
+        let renderer = SubtitleRenderer::new(vec![], overlay, 13);
+
+        let lines = renderer.split_words_into_lines(&cue);
+
+        assert_eq!(lines.len(), 2);
+        for line in lines {
+            let text = line
+                .iter()
+                .map(|word| word.text.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert!(character_count(&text) <= 13);
         }
     }
 }
