@@ -61,6 +61,16 @@ effects = ["bloom", "vignette"]
 # font_url = "https://example.com/subtitle-font.ttf"
 # font_family = "BM Dohyeon"
 
+# Subtitle style and readability.
+# background_opacity = 0.55
+# dim_opacity = 0.75
+# text_color = "#FFFFFF"
+# highlight_color = "#FFFFFF"
+# outline_color = "#000000"
+# outline_width = 2
+# margin_bottom = 0.08
+# karaoke = true
+
 # ---------------------------------------------------------------------------
 # The following options are CLI-only and cannot be set in this config file:
 #   --template (-t)    Template name or "all"

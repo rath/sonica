@@ -119,6 +119,50 @@ impl TextOverlay {
         }
     }
 
+    #[cfg(feature = "subtitles")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn composite_outlined(
+        &self,
+        pixels: &mut [u8],
+        width: u32,
+        height: u32,
+        text: &str,
+        x: u32,
+        y: u32,
+        color: [u8; 4],
+        outline_color: [u8; 4],
+        outline_width: u32,
+    ) {
+        let radius = outline_width as i32;
+        if radius > 0 && outline_color[3] > 0 {
+            let offsets = [
+                (-radius, -radius),
+                (0, -radius),
+                (radius, -radius),
+                (-radius, 0),
+                (radius, 0),
+                (-radius, radius),
+                (0, radius),
+                (radius, radius),
+            ];
+            for (offset_x, offset_y) in offsets {
+                let outline_x = offset_coordinate(x, offset_x);
+                let outline_y = offset_coordinate(y, offset_y);
+                self.composite(
+                    pixels,
+                    width,
+                    height,
+                    text,
+                    outline_x,
+                    outline_y,
+                    outline_color,
+                );
+            }
+        }
+
+        self.composite(pixels, width, height, text, x, y, color);
+    }
+
     /// Composite text onto an RGBA pixel buffer, clipping horizontally at `max_x`.
     ///
     /// Identical to `composite()` but pixels beyond `max_x` are not drawn.
@@ -270,6 +314,15 @@ impl TextOverlay {
 
         // No font has a real glyph — return whatever the last font produces
         fallback.unwrap_or_else(|| self.fonts.last().unwrap().rasterize(ch, self.font_size))
+    }
+}
+
+#[cfg(feature = "subtitles")]
+fn offset_coordinate(value: u32, offset: i32) -> u32 {
+    if offset < 0 {
+        value.saturating_sub(offset.unsigned_abs())
+    } else {
+        value.saturating_add(offset as u32)
     }
 }
 

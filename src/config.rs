@@ -78,6 +78,22 @@ pub struct SubtitleConfig {
     pub font: Option<PathBuf>,
     pub font_url: Option<String>,
     pub font_family: Option<String>,
+    #[serde(default = "default_subtitle_background_opacity")]
+    pub background_opacity: f32,
+    #[serde(default = "default_subtitle_dim_opacity")]
+    pub dim_opacity: f32,
+    #[serde(default = "default_subtitle_text_color")]
+    pub text_color: String,
+    #[serde(default = "default_subtitle_highlight_color")]
+    pub highlight_color: String,
+    #[serde(default = "default_subtitle_outline_color")]
+    pub outline_color: String,
+    #[serde(default = "default_subtitle_outline_width")]
+    pub outline_width: u32,
+    #[serde(default = "default_subtitle_margin_bottom")]
+    pub margin_bottom: f32,
+    #[serde(default = "default_subtitle_karaoke")]
+    pub karaoke: bool,
 }
 
 impl Default for SubtitleConfig {
@@ -90,6 +106,14 @@ impl Default for SubtitleConfig {
             font: None,
             font_url: None,
             font_family: None,
+            background_opacity: default_subtitle_background_opacity(),
+            dim_opacity: default_subtitle_dim_opacity(),
+            text_color: default_subtitle_text_color(),
+            highlight_color: default_subtitle_highlight_color(),
+            outline_color: default_subtitle_outline_color(),
+            outline_width: default_subtitle_outline_width(),
+            margin_bottom: default_subtitle_margin_bottom(),
+            karaoke: default_subtitle_karaoke(),
         }
     }
 }
@@ -97,6 +121,14 @@ impl Default for SubtitleConfig {
 fn default_whisper_model() -> String { "base".into() }
 fn default_subtitle_font_size() -> f32 { 48.0 }
 fn default_subtitle_max_chars() -> usize { 42 }
+fn default_subtitle_background_opacity() -> f32 { 0.55 }
+fn default_subtitle_dim_opacity() -> f32 { 0.75 }
+fn default_subtitle_text_color() -> String { "#FFFFFF".into() }
+fn default_subtitle_highlight_color() -> String { "#FFFFFF".into() }
+fn default_subtitle_outline_color() -> String { "#000000".into() }
+fn default_subtitle_outline_width() -> u32 { 2 }
+fn default_subtitle_margin_bottom() -> f32 { 0.08 }
+fn default_subtitle_karaoke() -> bool { true }
 
 pub fn load_config(path: &PathBuf) -> Option<Config> {
     let content = std::fs::read_to_string(path).ok()?;

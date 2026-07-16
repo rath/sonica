@@ -102,6 +102,30 @@ fn main() -> Result<()> {
             if cli.subtitle_font_family.is_none() {
                 cli.subtitle_font_family = cfg.subtitle.font_family;
             }
+            if cli.subtitle_background_opacity == 0.55 {
+                cli.subtitle_background_opacity = cfg.subtitle.background_opacity;
+            }
+            if cli.subtitle_dim_opacity == 0.75 {
+                cli.subtitle_dim_opacity = cfg.subtitle.dim_opacity;
+            }
+            if cli.subtitle_text_color == "#FFFFFF" {
+                cli.subtitle_text_color = cfg.subtitle.text_color;
+            }
+            if cli.subtitle_highlight_color == "#FFFFFF" {
+                cli.subtitle_highlight_color = cfg.subtitle.highlight_color;
+            }
+            if cli.subtitle_outline_color == "#000000" {
+                cli.subtitle_outline_color = cfg.subtitle.outline_color;
+            }
+            if cli.subtitle_outline_width == 2 {
+                cli.subtitle_outline_width = cfg.subtitle.outline_width;
+            }
+            if cli.subtitle_margin_bottom == 0.08 {
+                cli.subtitle_margin_bottom = cfg.subtitle.margin_bottom;
+            }
+            if !cli.no_subtitle_karaoke && !cfg.subtitle.karaoke {
+                cli.no_subtitle_karaoke = true;
+            }
         } else {
             log::warn!("Failed to load config from {}", path.display());
         }
@@ -409,7 +433,7 @@ fn main() -> Result<()> {
 
     // 8b. Subtitle renderer
     #[cfg(feature = "subtitles")]
-    let subtitle_renderer = subtitle_cues.map(|cues| {
+    let subtitle_renderer = subtitle_cues.map(|cues| -> Result<_> {
         let has_subtitle_font = cli.subtitle_font.is_some()
             || cli.subtitle_font_url.is_some()
             || cli.subtitle_font_family.is_some();
@@ -434,8 +458,23 @@ fn main() -> Result<()> {
             font_data,
             font_family,
         );
-        subtitle::render::SubtitleRenderer::new(cues, sub_overlay, cli.subtitle_max_chars)
-    });
+        let style = subtitle::render::SubtitleStyle::from_options(
+            cli.subtitle_background_opacity,
+            cli.subtitle_dim_opacity,
+            &cli.subtitle_text_color,
+            &cli.subtitle_highlight_color,
+            &cli.subtitle_outline_color,
+            cli.subtitle_outline_width,
+            cli.subtitle_margin_bottom,
+            !cli.no_subtitle_karaoke,
+        )?;
+        Ok(subtitle::render::SubtitleRenderer::new(
+            cues,
+            sub_overlay,
+            cli.subtitle_max_chars,
+            style,
+        ))
+    }).transpose()?;
 
     // 9. Render loop
     let pb = ProgressBar::new(total_frames as u64);

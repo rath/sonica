@@ -88,6 +88,12 @@ sonica audio.wav -o output.mp4 --subtitles --subtitle-font-size 64 --subtitle-ma
 # Use a different installed font for subtitles only
 sonica audio.wav -o output.mp4 --subtitles --subtitle-font-family "BM Dohyeon"
 
+# High-contrast custom subtitle style without karaoke highlighting
+sonica audio.wav -o output.mp4 --subtitles \
+  --subtitle-background-opacity 0.7 --subtitle-outline-width 3 \
+  --subtitle-text-color "#FFFFFF" --subtitle-highlight-color "#00FFAA" \
+  --no-subtitle-karaoke
+
 # Write an editable subtitle draft without rendering video
 sonica audio.wav --write-subtitles draft.srt --transcribe-only --subtitle-lang ko
 
@@ -170,7 +176,7 @@ Available models: `tiny`, `base`, `small`, `medium`, `large` (and `.en` English-
 
 On macOS, subtitle-enabled builds use Metal acceleration for Whisper inference automatically.
 
-Subtitles are rendered with a semi-transparent black background at the bottom center of the video. Font size and line wrapping can be adjusted with `--subtitle-font-size` and `--subtitle-max-chars`. Use `--subtitle-font`, `--subtitle-font-url`, or `--subtitle-font-family` to override the title font for subtitles only.
+Subtitles use a high-contrast semi-transparent background and outline at the bottom center of the video. Font size and line wrapping can be adjusted with `--subtitle-font-size` and `--subtitle-max-chars`. Use `--subtitle-font`, `--subtitle-font-url`, or `--subtitle-font-family` to override the title font for subtitles only. Background and dim-text opacity, text/highlight/outline colors, outline width, bottom margin, and karaoke highlighting are also configurable.
 
 ## CLI Reference
 
@@ -211,6 +217,14 @@ Options:
       --subtitle-font-url <URL>  Font URL used only for subtitles
       --subtitle-font-family <NAME>  Installed font family used only for subtitles
       --subtitle-max-chars <N>   Max characters per subtitle line [default: 42]
+      --subtitle-background-opacity <N>  Background opacity [default: 0.55]
+      --subtitle-dim-opacity <N>  Upcoming karaoke text opacity [default: 0.75]
+      --subtitle-text-color <HEX> Subtitle text color [default: #FFFFFF]
+      --subtitle-highlight-color <HEX>  Karaoke highlight color [default: #FFFFFF]
+      --subtitle-outline-color <HEX>  Outline color [default: #000000]
+      --subtitle-outline-width <PX>  Outline width [default: 2]
+      --subtitle-margin-bottom <N>  Bottom margin fraction [default: 0.08]
+      --no-subtitle-karaoke  Disable word-by-word highlighting
   -h, --help                 Print help
 ```
 

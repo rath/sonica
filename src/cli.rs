@@ -126,4 +126,36 @@ pub struct Cli {
     /// Maximum characters per subtitle line
     #[arg(long, default_value_t = 42)]
     pub subtitle_max_chars: usize,
+
+    /// Subtitle background opacity (0.0-1.0)
+    #[arg(long, default_value_t = 0.55)]
+    pub subtitle_background_opacity: f32,
+
+    /// Opacity of upcoming karaoke text (0.0-1.0)
+    #[arg(long, default_value_t = 0.75)]
+    pub subtitle_dim_opacity: f32,
+
+    /// Subtitle text color as #RRGGBB
+    #[arg(long, default_value = "#FFFFFF")]
+    pub subtitle_text_color: String,
+
+    /// Karaoke highlight color as #RRGGBB
+    #[arg(long, default_value = "#FFFFFF")]
+    pub subtitle_highlight_color: String,
+
+    /// Subtitle outline color as #RRGGBB
+    #[arg(long, default_value = "#000000")]
+    pub subtitle_outline_color: String,
+
+    /// Subtitle outline width in pixels
+    #[arg(long, default_value_t = 2)]
+    pub subtitle_outline_width: u32,
+
+    /// Bottom margin as a fraction of video height (0.0-0.5)
+    #[arg(long, default_value_t = 0.08)]
+    pub subtitle_margin_bottom: f32,
+
+    /// Disable word-by-word karaoke highlighting
+    #[arg(long)]
+    pub no_subtitle_karaoke: bool,
 }

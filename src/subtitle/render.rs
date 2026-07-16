@@ -1,18 +1,81 @@
 use super::cue::{character_count, SubtitleCue};
 use crate::render::text::TextOverlay;
+use anyhow::{Context, Result};
+
+#[derive(Clone, Debug)]
+pub struct SubtitleStyle {
+    background_color: [u8; 4],
+    text_color: [u8; 4],
+    dim_color: [u8; 4],
+    highlight_color: [u8; 4],
+    outline_color: [u8; 4],
+    outline_width: u32,
+    margin_bottom: f32,
+    karaoke: bool,
+}
+
+impl SubtitleStyle {
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_options(
+        background_opacity: f32,
+        dim_opacity: f32,
+        text_color: &str,
+        highlight_color: &str,
+        outline_color: &str,
+        outline_width: u32,
+        margin_bottom: f32,
+        karaoke: bool,
+    ) -> Result<Self> {
+        validate_fraction("subtitle background opacity", background_opacity, 1.0)?;
+        validate_fraction("subtitle dim opacity", dim_opacity, 1.0)?;
+        validate_fraction("subtitle bottom margin", margin_bottom, 0.5)?;
+
+        let text_color = parse_rgb(text_color).context("Invalid subtitle text color")?;
+        Ok(Self {
+            background_color: with_alpha([0, 0, 0], background_opacity),
+            text_color: with_alpha(text_color, 1.0),
+            dim_color: with_alpha(text_color, dim_opacity),
+            highlight_color: with_alpha(
+                parse_rgb(highlight_color).context("Invalid subtitle highlight color")?,
+                1.0,
+            ),
+            outline_color: with_alpha(
+                parse_rgb(outline_color).context("Invalid subtitle outline color")?,
+                1.0,
+            ),
+            outline_width,
+            margin_bottom,
+            karaoke,
+        })
+    }
+}
+
+impl Default for SubtitleStyle {
+    fn default() -> Self {
+        Self::from_options(0.55, 0.75, "#FFFFFF", "#FFFFFF", "#000000", 2, 0.08, true)
+            .expect("default subtitle style is valid")
+    }
+}
 
 pub struct SubtitleRenderer {
     cues: Vec<SubtitleCue>,
     overlay: TextOverlay,
     max_chars_per_line: usize,
+    style: SubtitleStyle,
 }
 
 impl SubtitleRenderer {
-    pub fn new(cues: Vec<SubtitleCue>, overlay: TextOverlay, max_chars_per_line: usize) -> Self {
+    pub fn new(
+        cues: Vec<SubtitleCue>,
+        overlay: TextOverlay,
+        max_chars_per_line: usize,
+        style: SubtitleStyle,
+    ) -> Self {
         Self {
             cues,
             overlay,
             max_chars_per_line,
+            style,
         }
     }
 
@@ -33,7 +96,7 @@ impl SubtitleRenderer {
         };
 
         // If the cue has no per-word timing data, fall back to plain rendering
-        if cue.words.is_empty() {
+        if cue.words.is_empty() || !self.style.karaoke {
             self.render_plain(pixels, width, height, cue);
             return;
         }
@@ -76,16 +139,20 @@ impl SubtitleRenderer {
         let bg_w = max_line_width + pad_x * 2;
         let bg_h = total_text_height + pad_top + pad_bottom;
 
-        let margin_bottom = (height as f32 * 0.08) as u32;
+        let margin_bottom = (height as f32 * self.style.margin_bottom) as u32;
         let bg_y = height.saturating_sub(margin_bottom + bg_h);
         let bg_x = if bg_w < width { (width - bg_w) / 2 } else { 0 };
 
-        // Draw semi-transparent black background (35% opacity)
-        let bg_color = [0u8, 0, 0, 89];
-        TextOverlay::fill_rect(pixels, width, height, bg_x, bg_y, bg_w, bg_h, bg_color);
-
-        let dim_color = [255u8, 255, 255, 100];
-        let bright_color = [255u8, 255, 255, 255];
+        TextOverlay::fill_rect(
+            pixels,
+            width,
+            height,
+            bg_x,
+            bg_y,
+            bg_w,
+            bg_h,
+            self.style.background_color,
+        );
         let text_y = bg_y + pad_top;
 
         for (i, words) in lines.iter().enumerate() {
@@ -95,10 +162,30 @@ impl SubtitleRenderer {
             let y = text_y + i as u32 * (font_size + line_spacing);
 
             // Pass 1: Draw entire line in dim color
-            self.overlay.composite(pixels, width, height, &line_text, line_x, y, dim_color);
+            self.overlay.composite_outlined(
+                pixels,
+                width,
+                height,
+                &line_text,
+                line_x,
+                y,
+                self.style.dim_color,
+                self.style.outline_color,
+                self.style.outline_width,
+            );
 
             // Pass 2: Overdraw spoken portion in bright color
-            self.render_karaoke_highlight(pixels, width, height, words, &line_text, line_x, y, time, bright_color);
+            self.render_karaoke_highlight(
+                pixels,
+                width,
+                height,
+                words,
+                &line_text,
+                line_x,
+                y,
+                time,
+                self.style.highlight_color,
+            );
         }
     }
 
@@ -231,21 +318,37 @@ impl SubtitleRenderer {
         let bg_w = max_line_width + pad_x * 2;
         let bg_h = total_text_height + pad_top + pad_bottom;
 
-        let margin_bottom = (height as f32 * 0.08) as u32;
+        let margin_bottom = (height as f32 * self.style.margin_bottom) as u32;
         let bg_y = height.saturating_sub(margin_bottom + bg_h);
         let bg_x = if bg_w < width { (width - bg_w) / 2 } else { 0 };
 
-        let bg_color = [0u8, 0, 0, 89];
-        TextOverlay::fill_rect(pixels, width, height, bg_x, bg_y, bg_w, bg_h, bg_color);
-
-        let text_color = [255u8, 255, 255, 255];
+        TextOverlay::fill_rect(
+            pixels,
+            width,
+            height,
+            bg_x,
+            bg_y,
+            bg_w,
+            bg_h,
+            self.style.background_color,
+        );
         let text_y = bg_y + pad_top;
 
         for (i, line) in lines.iter().enumerate() {
             let tw = self.overlay.measure_width(line);
             let x = if tw < width { (width - tw) / 2 } else { 0 };
             let y = text_y + i as u32 * (font_size + line_spacing);
-            self.overlay.composite(pixels, width, height, line, x, y, text_color);
+            self.overlay.composite_outlined(
+                pixels,
+                width,
+                height,
+                line,
+                x,
+                y,
+                self.style.text_color,
+                self.style.outline_color,
+                self.style.outline_width,
+            );
         }
     }
 
@@ -266,6 +369,36 @@ impl SubtitleRenderer {
             None
         }
     }
+}
+
+fn validate_fraction(name: &str, value: f32, maximum: f32) -> Result<()> {
+    if value.is_finite() && (0.0..=maximum).contains(&value) {
+        Ok(())
+    } else {
+        anyhow::bail!("{name} must be between 0.0 and {maximum}")
+    }
+}
+
+fn parse_rgb(value: &str) -> Result<[u8; 3]> {
+    let value = value.strip_prefix('#').unwrap_or(value);
+    if value.len() != 6 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        anyhow::bail!("expected #RRGGBB, got '{value}'");
+    }
+
+    Ok([
+        u8::from_str_radix(&value[0..2], 16)?,
+        u8::from_str_radix(&value[2..4], 16)?,
+        u8::from_str_radix(&value[4..6], 16)?,
+    ])
+}
+
+fn with_alpha(color: [u8; 3], opacity: f32) -> [u8; 4] {
+    [
+        color[0],
+        color[1],
+        color[2],
+        (opacity * 255.0).round() as u8,
+    ]
 }
 
 /// Wrap text into lines that fit within `max_chars`.
@@ -301,6 +434,45 @@ fn wrap_text(text: &str, max_chars: usize) -> Vec<String> {
 mod tests {
     use super::*;
     use crate::subtitle::transcribe::TimedWord;
+
+    #[test]
+    fn parses_custom_subtitle_style() {
+        let style = SubtitleStyle::from_options(
+            0.6,
+            0.8,
+            "#F0F0F0",
+            "00FFAA",
+            "#101010",
+            3,
+            0.12,
+            false,
+        )
+        .unwrap();
+
+        assert_eq!(style.background_color, [0, 0, 0, 153]);
+        assert_eq!(style.text_color, [240, 240, 240, 255]);
+        assert_eq!(style.dim_color, [240, 240, 240, 204]);
+        assert_eq!(style.highlight_color, [0, 255, 170, 255]);
+        assert_eq!(style.outline_width, 3);
+        assert!(!style.karaoke);
+    }
+
+    #[test]
+    fn rejects_invalid_subtitle_style_values() {
+        assert!(SubtitleStyle::from_options(
+            1.1,
+            0.75,
+            "#FFFFFF",
+            "#FFFFFF",
+            "#000000",
+            2,
+            0.08,
+            true,
+        )
+        .is_err());
+        assert!(parse_rgb("#FFFF").is_err());
+        assert!(validate_fraction("margin", 0.6, 0.5).is_err());
+    }
 
     #[test]
     fn wrap_short_text() {
@@ -352,7 +524,7 @@ mod tests {
         ];
 
         let overlay = TextOverlay::new(24.0, None, None, None);
-        let renderer = SubtitleRenderer::new(cues, overlay, 42);
+        let renderer = SubtitleRenderer::new(cues, overlay, 42, SubtitleStyle::default());
 
         assert!(renderer.find_active_cue(0.5).is_none());
         assert_eq!(renderer.find_active_cue(2.0).unwrap().text, "Hello");
@@ -376,7 +548,7 @@ mod tests {
         );
 
         let overlay = TextOverlay::new(24.0, None, None, None);
-        let renderer = SubtitleRenderer::new(vec![], overlay, 12);
+        let renderer = SubtitleRenderer::new(vec![], overlay, 12, SubtitleStyle::default());
 
         let lines = renderer.split_words_into_lines(&cue);
         assert!(lines.len() >= 2);
@@ -400,7 +572,7 @@ mod tests {
             ],
         );
         let overlay = TextOverlay::new(24.0, None, None, None);
-        let renderer = SubtitleRenderer::new(vec![], overlay, 13);
+        let renderer = SubtitleRenderer::new(vec![], overlay, 13, SubtitleStyle::default());
 
         let lines = renderer.split_words_into_lines(&cue);
 
