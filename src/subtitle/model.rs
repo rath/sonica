@@ -75,12 +75,14 @@ fn model_cache_dir() -> Result<PathBuf> {
 }
 
 fn download_model(filename: &str, dest: &Path) -> Result<()> {
-    use hf_hub::api::sync::Api;
+    use hf_hub::HFClientSync;
 
-    let api = Api::new().context("Failed to initialize HuggingFace Hub API")?;
-    let repo = api.model("ggerganov/whisper.cpp".to_string());
+    let client = HFClientSync::new().context("Failed to initialize HuggingFace Hub client")?;
+    let repo = client.model("ggerganov", "whisper.cpp");
     let downloaded = repo
-        .get(filename)
+        .download_file()
+        .filename(filename)
+        .send()
         .with_context(|| format!("Failed to download model file '{}' from HuggingFace", filename))?;
 
     // hf-hub downloads to its own cache; copy to our cache location

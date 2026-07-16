@@ -161,30 +161,36 @@ fn flush_word(bytes: &[u8], t0: i64, t1: i64) -> Option<TimedWord> {
 
 /// Resample mono f32 audio from `from_rate` to 16000 Hz using rubato.
 fn resample_to_16k(samples: &[f32], from_rate: u32) -> Result<Vec<f32>> {
-    use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
+    use rubato::audioadapter_buffers::direct::SequentialSlice;
+    use rubato::{
+        Async, FixedAsync, Resampler, SincInterpolationParameters, SincInterpolationType,
+        WindowFunction,
+    };
 
     let params = SincInterpolationParameters {
         sinc_len: 256,
-        f_cutoff: 0.95,
+        f_cutoff: None, // automatic cutoff for the chosen sinc length and window
         interpolation: SincInterpolationType::Linear,
         oversampling_factor: 256,
         window: WindowFunction::BlackmanHarris2,
     };
 
     let ratio = 16000.0 / from_rate as f64;
-    let mut resampler = SincFixedIn::<f32>::new(
+    let mut resampler = Async::<f32>::new_sinc(
         ratio,
-        2.0,    // max relative ratio
-        params,
-        samples.len(),
-        1, // mono
+        2.0, // max relative ratio
+        &params,
+        1024, // chunk size in frames
+        1,    // mono
+        FixedAsync::Input,
     )
     .context("Failed to create resampler")?;
 
-    let input = vec![samples.to_vec()];
+    let input = SequentialSlice::new(samples, 1, samples.len())
+        .map_err(|e| anyhow::anyhow!("Failed to wrap input samples: {e}"))?;
     let output = resampler
-        .process(&input, None)
+        .process_all(&input, samples.len(), None)
         .context("Resampling failed")?;
 
-    Ok(output.into_iter().next().unwrap_or_default())
+    Ok(output.take_data())
 }

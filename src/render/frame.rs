@@ -71,6 +71,7 @@ impl FrameRenderer {
                 label: Some("main_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &self.render_texture_view,
+                    depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
@@ -80,6 +81,7 @@ impl FrameRenderer {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             render_pass.set_pipeline(pipeline);
@@ -117,10 +119,10 @@ impl FrameRenderer {
         buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
             sender.send(result).unwrap();
         });
-        gpu.device.poll(wgpu::Maintain::Wait);
+        gpu.device.poll(wgpu::PollType::wait_indefinitely())?;
         receiver.recv()??;
 
-        let data = buffer_slice.get_mapped_range();
+        let data = buffer_slice.get_mapped_range()?;
 
         // Strip row padding
         let mut pixels = Vec::with_capacity((self.unpadded_bytes_per_row * self.height) as usize);
@@ -175,10 +177,10 @@ impl FrameRenderer {
         buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
             sender.send(result).unwrap();
         });
-        gpu.device.poll(wgpu::Maintain::Wait);
+        gpu.device.poll(wgpu::PollType::wait_indefinitely())?;
         receiver.recv()??;
 
-        let data = buffer_slice.get_mapped_range();
+        let data = buffer_slice.get_mapped_range()?;
         let mut pixels = Vec::with_capacity((self.unpadded_bytes_per_row * self.height) as usize);
         for row in 0..self.height {
             let start = (row * self.padded_bytes_per_row) as usize;

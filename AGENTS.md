@@ -171,7 +171,7 @@ The bottleneck is the per-frame GPU readback (`map_async` + `poll(Wait)`). A dou
 ## Conventions
 
 - Edition 2021 (not 2024, for dependency compatibility)
-- wgpu v24 (stable, Metal backend confirmed working)
+- wgpu v30 (Metal backend confirmed working)
 - All GPU structs use `#[repr(C)]` + `bytemuck::Pod` for safe buffer writes
 - Template shaders are self-contained (duplicate the common VS and struct definitions)
 - Post-processing effect shaders are embedded as string literals in `postprocess.rs`

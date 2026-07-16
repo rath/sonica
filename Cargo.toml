@@ -7,32 +7,32 @@ edition = "2021"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.8"
-symphonia = { version = "0.5", features = ["mp3", "flac", "ogg", "aac", "wav", "pcm"] }
+toml = "1"
+symphonia = { version = "0.6", features = ["mp3", "flac", "ogg", "aac", "wav", "pcm"] }
 rustfft = "6"
-wgpu = "24"
+wgpu = "30"
 bytemuck = { version = "1", features = ["derive"] }
-pollster = "0.4"
+pollster = "1"
 log = "0.4"
 env_logger = "0.11"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "blocking"] }
-indicatif = "0.17"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "blocking"] }
+indicatif = "0.18"
 anyhow = "1"
 thiserror = "2"
 rayon = "1"
 fontdue = "0.9"
 fontdb = "0.23"
 unicode-segmentation = "1"
-zip = "0.6"
+zip = "8"
 dirs = "6.0.0"
-rubato = { version = "0.16", optional = true }
-hf-hub = { version = "0.4", optional = true }
+rubato = { version = "4", optional = true }
+hf-hub = { version = "1", optional = true, features = ["blocking", "rustls-tls"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-whisper-rs = { version = "0.15", optional = true, features = ["metal"] }
+whisper-rs = { version = "0.16", optional = true, features = ["metal"] }
 
 [target.'cfg(not(target_os = "macos"))'.dependencies]
-whisper-rs = { version = "0.15", optional = true }
+whisper-rs = { version = "0.16", optional = true }
 
 [features]
 default = []

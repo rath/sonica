@@ -1,12 +1,11 @@
 use anyhow::{anyhow, Context, Result};
 use std::path::Path;
 use std::process::Command;
-use symphonia::core::audio::SampleBuffer;
-use symphonia::core::codecs::DecoderOptions;
-use symphonia::core::formats::FormatOptions;
+use symphonia::core::codecs::audio::AudioDecoderOptions;
+use symphonia::core::formats::probe::Hint;
+use symphonia::core::formats::{FormatOptions, TrackType};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
-use symphonia::core::probe::Hint;
 
 pub struct AudioData {
     pub samples: Vec<f32>,
@@ -53,40 +52,33 @@ fn decode_with_symphonia(path: &Path) -> Result<AudioData> {
         hint.with_extension(ext);
     }
 
-    let probed = symphonia::default::get_probe()
-        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+    let mut format = symphonia::default::get_probe()
+        .probe(&hint, mss, FormatOptions::default(), MetadataOptions::default())
         .context("Failed to probe audio format")?;
 
-    let mut format = probed.format;
-
     let track = format
-        .tracks()
-        .iter()
-        .find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL)
+        .default_track(TrackType::Audio)
         .context("No audio tracks found")?;
 
     let track_id = track.id;
-    let channels = track.codec_params.channels.map_or(1, |c| c.count());
-    let sample_rate = track.codec_params.sample_rate.context("Unknown sample rate")?;
+    let codec_params = track
+        .codec_params
+        .as_ref()
+        .and_then(|params| params.audio())
+        .context("Audio track has no codec parameters")?;
+
+    let channels = codec_params.channels.as_ref().map_or(1, |c| c.count());
+    let sample_rate = codec_params.sample_rate.context("Unknown sample rate")?;
 
     let mut decoder = symphonia::default::get_codecs()
-        .make(&track.codec_params, &DecoderOptions::default())
+        .make_audio_decoder(codec_params, &AudioDecoderOptions::default())
         .context("Failed to create audio decoder")?;
 
     let mut all_samples: Vec<f32> = Vec::new();
+    let mut packet_samples: Vec<f32> = Vec::new();
 
-    loop {
-        let packet = match format.next_packet() {
-            Ok(packet) => packet,
-            Err(symphonia::core::errors::Error::IoError(ref e))
-                if e.kind() == std::io::ErrorKind::UnexpectedEof =>
-            {
-                break;
-            }
-            Err(e) => return Err(e.into()),
-        };
-
-        if packet.track_id() != track_id {
+    while let Some(packet) = format.next_packet()? {
+        if packet.track_id != track_id {
             continue;
         }
 
@@ -96,19 +88,13 @@ fn decode_with_symphonia(path: &Path) -> Result<AudioData> {
             Err(e) => return Err(e.into()),
         };
 
-        let spec = *decoded.spec();
-        let num_frames = decoded.frames();
-
-        let mut sample_buf = SampleBuffer::<f32>::new(num_frames as u64, spec);
-        sample_buf.copy_interleaved_ref(decoded);
-
-        let samples = sample_buf.samples();
+        decoded.copy_to_vec_interleaved(&mut packet_samples);
 
         // Downmix to mono
         if channels == 1 {
-            all_samples.extend_from_slice(samples);
+            all_samples.extend_from_slice(&packet_samples);
         } else {
-            for frame_samples in samples.chunks(channels) {
+            for frame_samples in packet_samples.chunks(channels) {
                 let mono: f32 = frame_samples.iter().sum::<f32>() / channels as f32;
                 all_samples.push(mono);
             }
