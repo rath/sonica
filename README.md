@@ -82,6 +82,12 @@ sonica audio.wav -o output.mp4 --subtitles --whisper-model small --subtitle-lang
 # Customize subtitle appearance
 sonica audio.wav -o output.mp4 --subtitles --subtitle-font-size 64 --subtitle-max-chars 30
 
+# Write an editable subtitle draft without rendering video
+sonica audio.wav --write-subtitles draft.srt --transcribe-only --subtitle-lang ko
+
+# Render a corrected SRT file
+sonica audio.wav -o output.mp4 --subtitle-file corrected.srt
+
 # List available templates
 sonica --list-templates
 ```
@@ -145,6 +151,13 @@ sonica audio.wav --subtitles --whisper-model small --subtitle-lang ko
 
 # Use a local model file
 sonica audio.wav --subtitles --whisper-model /path/to/ggml-large-v3-turbo.bin
+
+# Save the generated cues while also rendering them
+sonica audio.wav --subtitles --write-subtitles draft.srt
+
+# Transcribe, edit, then render the corrected captions
+sonica audio.wav --write-subtitles draft.srt --transcribe-only --subtitle-lang ko
+sonica audio.wav --subtitle-file corrected.srt -o output.mp4
 ```
 
 Available models: `tiny`, `base`, `small`, `medium`, `large` (and `.en` English-only variants). Models are cached at `~/.cache/sonica/models/` after first download.
@@ -179,6 +192,9 @@ Options:
       --pix-fmt <FMT>        FFmpeg pixel format [default: yuv420p]
       --list-templates       List available templates and exit
       --subtitles            Enable speech-to-text subtitles (requires --features subtitles)
+      --subtitle-file <PATH> Render subtitles from an existing SRT file
+      --write-subtitles <PATH>  Save generated subtitles as an editable SRT file
+      --transcribe-only      Write subtitles without rendering a video
       --whisper-model <M>    Whisper model name or file path [default: base]
       --subtitle-lang <L>    Subtitle language, ISO 639-1 (e.g. "en", "ko"). Auto-detect if omitted
       --subtitle-font-size <PX>  Subtitle font size [default: 48]

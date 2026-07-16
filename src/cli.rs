@@ -83,6 +83,18 @@ pub struct Cli {
     #[arg(long)]
     pub subtitles: bool,
 
+    /// Render subtitles from an existing SRT file (requires --features subtitles)
+    #[arg(long, value_name = "PATH")]
+    pub subtitle_file: Option<PathBuf>,
+
+    /// Save generated subtitles as an editable SRT file
+    #[arg(long, value_name = "PATH")]
+    pub write_subtitles: Option<PathBuf>,
+
+    /// Transcribe and write subtitles without rendering a video
+    #[arg(long, requires = "write_subtitles")]
+    pub transcribe_only: bool,
+
     /// Whisper model: file path or model name (tiny/base/small/medium/large)
     #[arg(long, default_value = "base")]
     pub whisper_model: String,

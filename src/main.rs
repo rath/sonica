@@ -114,6 +114,14 @@ fn main() -> Result<()> {
         anyhow::bail!("Input file not found: {}", input.display());
     }
 
+    if cli.subtitle_file.is_some()
+        && (cli.subtitles || cli.write_subtitles.is_some() || cli.transcribe_only)
+    {
+        anyhow::bail!(
+            "--subtitle-file cannot be combined with --subtitles, --write-subtitles, or --transcribe-only"
+        );
+    }
+
     log::info!("sonica - GPU-accelerated audio visualizer");
     log::info!("Input: {}", input.display());
     log::info!("Output: {}", cli.output.display());
@@ -126,7 +134,15 @@ fn main() -> Result<()> {
 
     // 1b. Transcribe audio (if subtitles enabled)
     #[cfg(feature = "subtitles")]
-    let subtitle_cues = if cli.subtitles {
+    let subtitle_cues = if let Some(ref subtitle_path) = cli.subtitle_file {
+        let cues = subtitle::srt::read_srt(subtitle_path)?;
+        log::info!(
+            "Loaded {} subtitle cues from {}",
+            cues.len(),
+            subtitle_path.display()
+        );
+        Some(cues)
+    } else if cli.subtitles || cli.write_subtitles.is_some() {
         log::info!("Transcribing audio for subtitles...");
         let model_path = subtitle::model::resolve_model_path(&cli.whisper_model)?;
         let transcriber = subtitle::transcribe::WhisperTranscriber::new(
@@ -143,13 +159,25 @@ fn main() -> Result<()> {
         for (i, c) in cues.iter().enumerate() {
             log::info!("  [{:3}] {:.2}s - {:.2}s  {:?}", i, c.start_time, c.end_time, c.text);
         }
+        if let Some(ref subtitle_path) = cli.write_subtitles {
+            subtitle::srt::write_srt(subtitle_path, &cues)?;
+            log::info!("Wrote subtitles to {}", subtitle_path.display());
+        }
+        if cli.transcribe_only {
+            log::info!("Transcription complete; skipping video render");
+            return Ok(());
+        }
         Some(cues)
     } else {
         None
     };
 
     #[cfg(not(feature = "subtitles"))]
-    if cli.subtitles {
+    if cli.subtitles
+        || cli.subtitle_file.is_some()
+        || cli.write_subtitles.is_some()
+        || cli.transcribe_only
+    {
         anyhow::bail!(
             "Subtitle support requires the 'subtitles' feature. \
              Rebuild with: cargo build --features subtitles"

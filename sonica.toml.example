@@ -59,6 +59,9 @@ effects = ["bloom", "vignette"]
 #   --title            Title text overlay (top right)
 #   --show-time        Elapsed time overlay (bottom right)
 #   --subtitles        Enable subtitle generation
+#   --subtitle-file    Render an existing SRT subtitle file
+#   --write-subtitles  Save generated subtitles as an editable SRT file
+#   --transcribe-only  Write subtitles without rendering a video
 #   --bitrate (-b)     Video bitrate (e.g. "2400k", "5M")
 #   --pix-fmt          FFmpeg pixel format (default: yuv420p)
 #   --param            Template parameter overrides (e.g. bar_count=128)
