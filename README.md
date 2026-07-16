@@ -25,7 +25,7 @@ All templates and shaders are embedded in the binary, so no additional files are
 cargo install --git https://github.com/rath/sonica --features subtitles
 ```
 
-This adds speech-to-text subtitle overlay via [whisper.cpp](https://github.com/ggerganov/whisper.cpp). Whisper models are automatically downloaded on first use.
+This adds speech-to-text subtitle overlay via [whisper.cpp](https://github.com/ggerganov/whisper.cpp). Whisper models are automatically downloaded on first use. macOS builds enable Whisper's Metal backend automatically; other platforms use the backend provided by their standard build.
 
 ### Build from source
 
@@ -167,6 +167,8 @@ sonica audio.wav --subtitle-file corrected.srt -o output.mp4
 ```
 
 Available models: `tiny`, `base`, `small`, `medium`, `large` (and `.en` English-only variants). Models are cached at `~/.cache/sonica/models/` after first download.
+
+On macOS, subtitle-enabled builds use Metal acceleration for Whisper inference automatically.
 
 Subtitles are rendered with a semi-transparent black background at the bottom center of the video. Font size and line wrapping can be adjusted with `--subtitle-font-size` and `--subtitle-max-chars`. Use `--subtitle-font`, `--subtitle-font-url`, or `--subtitle-font-family` to override the title font for subtitles only.
 
