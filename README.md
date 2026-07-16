@@ -170,7 +170,7 @@ Subtitles are rendered with a semi-transparent black background at the bottom ce
 sonica [OPTIONS] [INPUT]
 
 Arguments:
-  [INPUT]  Input audio file (WAV, MP3, FLAC, OGG)
+  [INPUT]  Input audio file (WAV, MP3, FLAC, OGG, AAC, WebM/Opus, or any FFmpeg-supported format)
 
 Options:
   -o, --output <PATH>        Output video file [default: output.mp4]
@@ -257,7 +257,7 @@ For Korean text, use a font that includes CJK glyphs (for example `NotoSansKR-Re
 
 ## Supported Audio Formats
 
-WAV, MP3, FLAC, OGG/Vorbis, AAC — via [symphonia](https://github.com/pdeljanov/Symphonia).
+WAV, MP3, FLAC, OGG/Vorbis, and AAC are decoded directly via [symphonia](https://github.com/pdeljanov/Symphonia). Unsupported codecs and containers, including WebM/Opus, automatically fall back to FFmpeg decoding.
 
 ## How It Works
 

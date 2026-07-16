@@ -4,7 +4,7 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[command(name = "sonica", about = "GPU-accelerated audio visualizer video generator")]
 pub struct Cli {
-    /// Input audio file (WAV, MP3, FLAC, OGG)
+    /// Input audio file (WAV, MP3, FLAC, OGG, AAC, WebM/Opus, or any FFmpeg-supported format)
     pub input: Option<PathBuf>,
 
     /// Output video file
