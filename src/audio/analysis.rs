@@ -114,7 +114,7 @@ fn detect_beats(flux_values: &[(f32, f32)]) -> Vec<f32> {
             // Minimum gap between beats (100ms)
             let far_enough = beat_times
                 .last()
-                .map_or(true, |&last: &f32| flux_values[i].0 - last > 0.1);
+                .is_none_or(|&last: &f32| flux_values[i].0 - last > 0.1);
 
             if is_peak && far_enough {
                 beat_times.push(flux_values[i].0);
@@ -136,7 +136,7 @@ fn estimate_tempo(beat_times: &[f32]) -> f32 {
     let reasonable: Vec<f32> = intervals
         .iter()
         .copied()
-        .filter(|&i| i >= 0.3 && i <= 1.0)
+        .filter(|&i| (0.3..=1.0).contains(&i))
         .collect();
 
     if reasonable.is_empty() {
@@ -317,9 +317,15 @@ fn pass3_smooth(
     forward_high[0] = raw[0].upper_mid + raw[0].presence + raw[0].brilliance;
 
     for i in 1..n {
-        for j in 0..num_bins {
-            forward_bins[i][j] =
-                alpha * raw[i].fft_bins[j] + (1.0 - alpha) * forward_bins[i - 1][j];
+        let (previous_rows, current_rows) = forward_bins.split_at_mut(i);
+        let previous = &previous_rows[i - 1];
+        let current = &mut current_rows[0];
+        for ((output, &input), &previous_value) in current
+            .iter_mut()
+            .zip(&raw[i].fft_bins)
+            .zip(previous)
+        {
+            *output = alpha * input + (1.0 - alpha) * previous_value;
         }
         forward_rms[i] = alpha * raw[i].rms + (1.0 - alpha) * forward_rms[i - 1];
         let bass_val = raw[i].sub_bass + raw[i].bass;
@@ -344,9 +350,15 @@ fn pass3_smooth(
     backward_high[n - 1] = raw[n - 1].upper_mid + raw[n - 1].presence + raw[n - 1].brilliance;
 
     for i in (0..n - 1).rev() {
-        for j in 0..num_bins {
-            backward_bins[i][j] =
-                alpha * raw[i].fft_bins[j] + (1.0 - alpha) * backward_bins[i + 1][j];
+        let (current_rows, following_rows) = backward_bins.split_at_mut(i + 1);
+        let current = &mut current_rows[i];
+        let following = &following_rows[0];
+        for ((output, &input), &following_value) in current
+            .iter_mut()
+            .zip(&raw[i].fft_bins)
+            .zip(following)
+        {
+            *output = alpha * input + (1.0 - alpha) * following_value;
         }
         backward_rms[i] = alpha * raw[i].rms + (1.0 - alpha) * backward_rms[i + 1];
         let bass_val = raw[i].sub_bass + raw[i].bass;

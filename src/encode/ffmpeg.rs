@@ -11,6 +11,7 @@ pub struct FfmpegEncoder {
 }
 
 impl FfmpegEncoder {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         output_path: &Path,
         input_audio: &Path,

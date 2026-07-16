@@ -190,6 +190,7 @@ impl SubtitleRenderer {
     }
 
     /// Render the bright highlight over spoken words in a single line.
+    #[allow(clippy::too_many_arguments)]
     fn render_karaoke_highlight(
         &self,
         pixels: &mut [u8],
@@ -257,7 +258,7 @@ impl SubtitleRenderer {
     }
 
     /// Split cue words into lines respecting max_chars_per_line.
-    fn split_words_into_lines<'a>(&self, cue: &'a SubtitleCue) -> Vec<Vec<super::transcribe::TimedWord>> {
+    fn split_words_into_lines(&self, cue: &SubtitleCue) -> Vec<Vec<super::transcribe::TimedWord>> {
         let mut lines: Vec<Vec<super::transcribe::TimedWord>> = Vec::new();
         let mut current_line: Vec<super::transcribe::TimedWord> = Vec::new();
         let mut current_len = 0usize;

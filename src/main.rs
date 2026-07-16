@@ -8,11 +8,9 @@ mod encode;
 mod subtitle;
 
 use anyhow::{Context, Result};
-use bytemuck;
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 use std::collections::HashMap;
-use wgpu;
 
 use cli::Cli;
 use render::gpu::GpuContext;

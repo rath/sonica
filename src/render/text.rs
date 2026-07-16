@@ -66,6 +66,7 @@ impl TextOverlay {
     }
 
     /// Composite text onto an RGBA pixel buffer at the given position.
+    #[allow(clippy::too_many_arguments)]
     pub fn composite(
         &self,
         pixels: &mut [u8],
@@ -168,6 +169,7 @@ impl TextOverlay {
     /// Identical to `composite()` but pixels beyond `max_x` are not drawn.
     /// Used for karaoke-style partial word highlighting.
     #[cfg(feature = "subtitles")]
+    #[allow(clippy::too_many_arguments)]
     pub fn composite_clipped(
         &self,
         pixels: &mut [u8],
@@ -235,6 +237,7 @@ impl TextOverlay {
 
     /// Fill a rectangle on the pixel buffer with the given RGBA color (alpha-blended).
     #[cfg(feature = "subtitles")]
+    #[allow(clippy::too_many_arguments)]
     pub fn fill_rect(
         pixels: &mut [u8],
         width: u32,
@@ -337,10 +340,10 @@ pub fn load_font_from_url(url: &str) -> Result<Vec<u8>> {
     }
 
     let css: Cow<str> = String::from_utf8_lossy(&body);
-    let urls = extract_css_urls(&css.as_ref());
+    let urls = extract_css_urls(css.as_ref());
 
     if let Some(ref google_family) = google_family {
-        if let Some(font) = fetch_google_fonts_from_repo(&google_family)? {
+        if let Some(font) = fetch_google_fonts_from_repo(google_family)? {
             return Ok(font);
         }
     }
@@ -366,8 +369,8 @@ pub fn load_font_from_url(url: &str) -> Result<Vec<u8>> {
     }
 
     if let Some(family) = google_family.as_ref() {
-        let archive = fetch_google_fonts_archive(&family)?;
-        if let Some(font) = extract_font_from_zip(&archive, &family)? {
+        let archive = fetch_google_fonts_archive(family)?;
+        if let Some(font) = extract_font_from_zip(&archive, family)? {
             return Ok(font);
         }
     }
@@ -466,11 +469,11 @@ fn extension_from_url(url: &str) -> Option<String> {
 
 fn find_ttf_font_url(css_urls: &[String], base_url: &str) -> Option<String> {
     for url in css_urls {
-        if is_ttf_or_otf_url(&url) {
-            return if is_absolute_url(&url) {
+        if is_ttf_or_otf_url(url) {
+            return if is_absolute_url(url) {
                 Some(url.to_string())
             } else {
-                Some(join_with_base(base_url, &url))
+                Some(join_with_base(base_url, url))
             };
         }
     }
@@ -607,7 +610,7 @@ fn google_font_family_stem(family: &str) -> String {
                 match chars.next() {
                     Some(first) => {
                         let mut token = String::new();
-                        token.push_str(&first.to_ascii_uppercase().to_string());
+                        token.push(first.to_ascii_uppercase());
                         token.push_str(&chars.as_str().to_ascii_lowercase());
                         token
                     }
@@ -661,7 +664,7 @@ fn normalize_google_family(family: &str) -> String {
     let cleaned = cleaned.replace("%20", " ");
 
     cleaned
-        .split(|ch: char| ch == ':' || ch == ';')
+        .split([':', ';'])
         .next()
         .unwrap_or(cleaned.as_str())
         .to_string()
@@ -805,7 +808,7 @@ fn load_font_from_bytes_at_index(bytes: &[u8], collection_index: u32) -> Option<
         collection_index,
         ..FontSettings::default()
     };
-    match Font::from_bytes(bytes.to_vec(), settings) {
+    match Font::from_bytes(bytes, settings) {
         Ok(font) => Some(font),
         Err(err) => {
             warn!("Failed to parse font file: {}", err);
