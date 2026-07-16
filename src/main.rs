@@ -78,6 +78,9 @@ fn main() -> Result<()> {
             if cli.font_url.is_none() {
                 cli.font_url = cfg.output.font_url;
             }
+            if cli.font_family.is_none() {
+                cli.font_family = cfg.output.font_family;
+            }
             if cli.whisper_model == "base" {
                 cli.whisper_model = cfg.subtitle.whisper_model;
             }
@@ -89,6 +92,15 @@ fn main() -> Result<()> {
             }
             if cli.subtitle_max_chars == 42 {
                 cli.subtitle_max_chars = cfg.subtitle.max_chars_per_line;
+            }
+            if cli.subtitle_font.is_none() {
+                cli.subtitle_font = cfg.subtitle.font;
+            }
+            if cli.subtitle_font_url.is_none() {
+                cli.subtitle_font_url = cfg.subtitle.font_url;
+            }
+            if cli.subtitle_font_family.is_none() {
+                cli.subtitle_font_family = cfg.subtitle.font_family;
             }
         } else {
             log::warn!("Failed to load config from {}", path.display());
@@ -119,6 +131,31 @@ fn main() -> Result<()> {
     {
         anyhow::bail!(
             "--subtitle-file cannot be combined with --subtitles, --write-subtitles, or --transcribe-only"
+        );
+    }
+
+    let title_font_sources = [
+        cli.font.is_some(),
+        cli.font_url.is_some(),
+        cli.font_family.is_some(),
+    ];
+    if title_font_sources.into_iter().filter(|selected| *selected).count() > 1 {
+        anyhow::bail!("Use only one of --font, --font-url, or --font-family");
+    }
+
+    let subtitle_font_sources = [
+        cli.subtitle_font.is_some(),
+        cli.subtitle_font_url.is_some(),
+        cli.subtitle_font_family.is_some(),
+    ];
+    if subtitle_font_sources
+        .into_iter()
+        .filter(|selected| *selected)
+        .count()
+        > 1
+    {
+        anyhow::bail!(
+            "Use only one of --subtitle-font, --subtitle-font-url, or --subtitle-font-family"
         );
     }
 
@@ -344,6 +381,19 @@ fn main() -> Result<()> {
         None
     };
 
+    #[cfg(feature = "subtitles")]
+    let subtitle_font_bytes = if let Some(ref font_url) = cli.subtitle_font_url {
+        match load_font_from_url(font_url) {
+            Ok(bytes) => Some(bytes),
+            Err(err) => {
+                log::warn!("Failed to load subtitle font from URL: {}", err);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let text_overlay = if cli.title.is_some() || cli.show_time {
         let shorter = cli.width.min(cli.height) as f32;
         let font_size = (shorter * 0.046).max(24.0);
@@ -351,6 +401,7 @@ fn main() -> Result<()> {
             font_size,
             cli.font.as_deref(),
             font_bytes.as_deref(),
+            cli.font_family.as_deref(),
         ))
     } else {
         None
@@ -359,10 +410,29 @@ fn main() -> Result<()> {
     // 8b. Subtitle renderer
     #[cfg(feature = "subtitles")]
     let subtitle_renderer = subtitle_cues.map(|cues| {
+        let has_subtitle_font = cli.subtitle_font.is_some()
+            || cli.subtitle_font_url.is_some()
+            || cli.subtitle_font_family.is_some();
+        let font_path = if has_subtitle_font {
+            cli.subtitle_font.as_deref()
+        } else {
+            cli.font.as_deref()
+        };
+        let font_data = if has_subtitle_font {
+            subtitle_font_bytes.as_deref()
+        } else {
+            font_bytes.as_deref()
+        };
+        let font_family = if has_subtitle_font {
+            cli.subtitle_font_family.as_deref()
+        } else {
+            cli.font_family.as_deref()
+        };
         let sub_overlay = TextOverlay::new(
             cli.subtitle_font_size,
-            cli.font.as_deref(),
-            font_bytes.as_deref(),
+            font_path,
+            font_data,
+            font_family,
         );
         subtitle::render::SubtitleRenderer::new(cues, sub_overlay, cli.subtitle_max_chars)
     });

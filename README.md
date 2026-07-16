@@ -73,6 +73,9 @@ sonica audio.wav --title "안녕하세요" --font-url "https://raw.githubusercon
 # 로컬 폰트 파일 경로 예시 (macOS)
 sonica audio.wav --title "안녕하세요" --font "/System/Library/Fonts/Supplemental/NotoSansCJK-Regular.ttc"
 
+# 설치된 시스템 폰트를 패밀리명으로 선택
+sonica audio.wav --title "안녕하세요" --font-family "BM Dohyeon"
+
 # Speech-to-text subtitles (requires --features subtitles)
 sonica audio.wav -o output.mp4 --subtitles
 
@@ -81,6 +84,9 @@ sonica audio.wav -o output.mp4 --subtitles --whisper-model small --subtitle-lang
 
 # Customize subtitle appearance
 sonica audio.wav -o output.mp4 --subtitles --subtitle-font-size 64 --subtitle-max-chars 30
+
+# Use a different installed font for subtitles only
+sonica audio.wav -o output.mp4 --subtitles --subtitle-font-family "BM Dohyeon"
 
 # Write an editable subtitle draft without rendering video
 sonica audio.wav --write-subtitles draft.srt --transcribe-only --subtitle-lang ko
@@ -162,7 +168,7 @@ sonica audio.wav --subtitle-file corrected.srt -o output.mp4
 
 Available models: `tiny`, `base`, `small`, `medium`, `large` (and `.en` English-only variants). Models are cached at `~/.cache/sonica/models/` after first download.
 
-Subtitles are rendered with a semi-transparent black background at the bottom center of the video. Font size and line wrapping can be adjusted with `--subtitle-font-size` and `--subtitle-max-chars`.
+Subtitles are rendered with a semi-transparent black background at the bottom center of the video. Font size and line wrapping can be adjusted with `--subtitle-font-size` and `--subtitle-max-chars`. Use `--subtitle-font`, `--subtitle-font-url`, or `--subtitle-font-family` to override the title font for subtitles only.
 
 ## CLI Reference
 
@@ -185,6 +191,7 @@ Options:
       --title <TEXT>         Title text overlay (top right)
       --font <PATH>          Font file for title/time overlay (TTF/OTF)
       --font-url <URL>       Font URL for title/time overlay (TTF/OTF or Google Fonts URL)
+      --font-family <NAME>   Installed font family for title/time overlay
       --show-time            Show elapsed time overlay, MM:SS.CC (bottom right)
       --param <KEY=VALUE>    Template parameter overrides, comma-separated
       --config <PATH>        Config file path [default: ./sonica.toml]
@@ -198,6 +205,9 @@ Options:
       --whisper-model <M>    Whisper model name or file path [default: base]
       --subtitle-lang <L>    Subtitle language, ISO 639-1 (e.g. "en", "ko"). Auto-detect if omitted
       --subtitle-font-size <PX>  Subtitle font size [default: 48]
+      --subtitle-font <PATH> Font file used only for subtitles
+      --subtitle-font-url <URL>  Font URL used only for subtitles
+      --subtitle-font-family <NAME>  Installed font family used only for subtitles
       --subtitle-max-chars <N>   Max characters per subtitle line [default: 42]
   -h, --help                 Print help
 ```

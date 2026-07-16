@@ -51,6 +51,10 @@ pub struct Cli {
     #[arg(long)]
     pub font_url: Option<String>,
 
+    /// Installed font family for title/time overlay
+    #[arg(long, value_name = "NAME")]
+    pub font_family: Option<String>,
+
     /// Show elapsed time overlay
     #[arg(long)]
     pub show_time: bool,
@@ -106,6 +110,18 @@ pub struct Cli {
     /// Subtitle font size in pixels
     #[arg(long, default_value_t = 48.0)]
     pub subtitle_font_size: f32,
+
+    /// Font file used only for subtitles (TTF/OTF/TTC path)
+    #[arg(long, value_name = "PATH")]
+    pub subtitle_font: Option<PathBuf>,
+
+    /// Font URL used only for subtitles
+    #[arg(long, value_name = "URL")]
+    pub subtitle_font_url: Option<String>,
+
+    /// Installed font family used only for subtitles
+    #[arg(long, value_name = "NAME")]
+    pub subtitle_font_family: Option<String>,
 
     /// Maximum characters per subtitle line
     #[arg(long, default_value_t = 42)]

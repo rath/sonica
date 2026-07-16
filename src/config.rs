@@ -27,6 +27,7 @@ pub struct OutputConfig {
     pub codec: String,
     pub font: Option<PathBuf>,
     pub font_url: Option<String>,
+    pub font_family: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -45,6 +46,7 @@ impl Default for OutputConfig {
             codec: default_codec(),
             font: None,
             font_url: None,
+            font_family: None,
         }
     }
 }
@@ -73,6 +75,9 @@ pub struct SubtitleConfig {
     pub font_size: f32,
     #[serde(default = "default_subtitle_max_chars")]
     pub max_chars_per_line: usize,
+    pub font: Option<PathBuf>,
+    pub font_url: Option<String>,
+    pub font_family: Option<String>,
 }
 
 impl Default for SubtitleConfig {
@@ -82,6 +87,9 @@ impl Default for SubtitleConfig {
             language: None,
             font_size: default_subtitle_font_size(),
             max_chars_per_line: default_subtitle_max_chars(),
+            font: None,
+            font_url: None,
+            font_family: None,
         }
     }
 }

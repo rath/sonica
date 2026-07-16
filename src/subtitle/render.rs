@@ -351,7 +351,7 @@ mod tests {
             make_cue("World", 4.0, 6.0, vec![tw("World", 4.0, 6.0)]),
         ];
 
-        let overlay = TextOverlay::new(24.0, None, None);
+        let overlay = TextOverlay::new(24.0, None, None, None);
         let renderer = SubtitleRenderer::new(cues, overlay, 42);
 
         assert!(renderer.find_active_cue(0.5).is_none());
@@ -375,7 +375,7 @@ mod tests {
             ],
         );
 
-        let overlay = TextOverlay::new(24.0, None, None);
+        let overlay = TextOverlay::new(24.0, None, None, None);
         let renderer = SubtitleRenderer::new(vec![], overlay, 12);
 
         let lines = renderer.split_words_into_lines(&cue);
@@ -399,7 +399,7 @@ mod tests {
                 tw("때문에", 3.0, 4.0),
             ],
         );
-        let overlay = TextOverlay::new(24.0, None, None);
+        let overlay = TextOverlay::new(24.0, None, None, None);
         let renderer = SubtitleRenderer::new(vec![], overlay, 13);
 
         let lines = renderer.split_words_into_lines(&cue);

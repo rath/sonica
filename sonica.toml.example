@@ -24,6 +24,9 @@ codec = "libx264"
 # Font URL for title/time overlay (direct TTF/OTF URL)
 # font_url = "https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/SubsetOTF/KR/NotoSansKR-Regular.otf"
 
+# Or select an installed system font by family name.
+# font_family = "BM Dohyeon"
+
 [audio]
 # Smoothing factor for audio analysis, 0.0-1.0 (default: 0.85)
 # Higher = smoother animation, lower = more reactive
@@ -52,6 +55,11 @@ effects = ["bloom", "vignette"]
 
 # Maximum characters per subtitle line before wrapping (default: 42)
 # max_chars_per_line = 42
+
+# Optional subtitle-only font. Set only one of these values.
+# font = "/path/to/subtitle-font.otf"
+# font_url = "https://example.com/subtitle-font.ttf"
+# font_family = "BM Dohyeon"
 
 # ---------------------------------------------------------------------------
 # The following options are CLI-only and cannot be set in this config file:

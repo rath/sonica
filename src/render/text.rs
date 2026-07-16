@@ -16,7 +16,12 @@ pub struct TextOverlay {
 }
 
 impl TextOverlay {
-    pub fn new(font_size: f32, font_path: Option<&Path>, font_bytes: Option<&[u8]>) -> Self {
+    pub fn new(
+        font_size: f32,
+        font_path: Option<&Path>,
+        font_bytes: Option<&[u8]>,
+        font_family: Option<&str>,
+    ) -> Self {
         let mut fonts = Vec::new();
 
         if let Some(font_path) = font_path {
@@ -35,6 +40,17 @@ impl TextOverlay {
                 fonts.push(font);
             } else {
                 warn!("Failed to parse font bytes from --font-url. Falling back to system fonts.");
+            }
+        }
+
+        if let Some(font_family) = font_family {
+            if let Some(font) = load_system_font_family(font_family) {
+                fonts.push(font);
+            } else {
+                warn!(
+                    "Installed font family '{}' was not found. Falling back to system fonts.",
+                    font_family
+                );
             }
         }
 
@@ -728,13 +744,53 @@ fn load_font(path: &Path) -> Option<Font> {
 }
 
 fn load_font_from_bytes(bytes: &[u8]) -> Option<Font> {
-    match Font::from_bytes(bytes.to_vec(), FontSettings::default()) {
+    load_font_from_bytes_at_index(bytes, 0)
+}
+
+fn load_font_from_bytes_at_index(bytes: &[u8], collection_index: u32) -> Option<Font> {
+    let settings = FontSettings {
+        collection_index,
+        ..FontSettings::default()
+    };
+    match Font::from_bytes(bytes.to_vec(), settings) {
         Ok(font) => Some(font),
         Err(err) => {
             warn!("Failed to parse font file: {}", err);
             None
         }
     }
+}
+
+fn load_system_font_family(family: &str) -> Option<Font> {
+    use fontdb::{Database, Family, Query, Stretch, Style, Weight};
+    use std::sync::OnceLock;
+
+    static DATABASE: OnceLock<Database> = OnceLock::new();
+    let database = DATABASE.get_or_init(|| {
+        let mut database = Database::new();
+        database.load_system_fonts();
+
+        #[cfg(target_os = "macos")]
+        {
+            database.load_fonts_dir("/System/Library/AssetsV2/com_apple_MobileAsset_Font7");
+            database.load_fonts_dir("/System/Library/AssetsV2/com_apple_MobileAsset_Font8");
+        }
+
+        database
+    });
+
+    let id = database.query(&Query {
+        families: &[Family::Name(family)],
+        weight: Weight::NORMAL,
+        stretch: Stretch::Normal,
+        style: Style::Normal,
+    })?;
+
+    log::info!("Using installed font family '{}'", family);
+
+    database.with_face_data(id, |bytes, face_index| {
+        load_font_from_bytes_at_index(bytes, face_index)
+    })?
 }
 
 fn load_embedded_font() -> Font {
