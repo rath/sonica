@@ -8,7 +8,7 @@ mod encode;
 mod subtitle;
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{CommandFactory, FromArgMatches};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::collections::HashMap;
 
@@ -21,6 +21,54 @@ use render::text::{load_font_from_url, TextOverlay};
 use encode::ffmpeg::FfmpegEncoder;
 use audio::features::SmoothedFrame;
 use templates::loader;
+
+/// Template name paired with its manifest description, falling back to an empty
+/// description when a manifest is unreadable (mirrors `--list-templates`).
+fn template_catalog() -> Vec<(String, String)> {
+    loader::list_templates()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|name| {
+            let description = loader::load_template(&name)
+                .map(|t| t.manifest.description)
+                .unwrap_or_default();
+            (name, description)
+        })
+        .collect()
+}
+
+/// Built at runtime rather than hardcoded, so `--help` also shows any custom
+/// templates found on the filesystem and can never drift from what loads.
+fn template_long_help() -> String {
+    let mut help = String::from(
+        "Visual template -- the picture itself, not a post-processing effect.\n\n\
+         Available templates:\n",
+    );
+    for (name, description) in template_catalog() {
+        help.push_str(&format!("  {name:<20} {description}\n"));
+    }
+    help.push_str("\nCustom templates in ./templates/<name>/ are picked up automatically.");
+    help
+}
+
+/// Generated from the effect registry in `postprocess`, so a new shader shows
+/// up here as soon as it is registered.
+fn effects_long_help() -> String {
+    let mut help = String::from(
+        "Post-processing applied on top of the template, comma-separated and\n\
+         run in the order given. Omit to use the template's own defaults.\n\n\
+         Available effects:\n",
+    );
+    for (name, description) in render::postprocess::EFFECTS {
+        help.push_str(&format!("  {name:<22} {description}\n"));
+    }
+    help.push_str("\nPresets:\n");
+    for (name, expansion) in render::postprocess::EFFECT_PRESETS {
+        help.push_str(&format!("  {name:<22} {expansion}\n"));
+    }
+    help.push_str("\nExample: --effects bloom,vignette");
+    help
+}
 
 struct TemplateSlot {
     pipeline: RenderPipeline,
@@ -35,7 +83,15 @@ fn main() -> Result<()> {
         .format_timestamp_millis()
         .init();
 
-    let mut cli = Cli::parse();
+    // Attach the runtime-generated value lists before parsing so `--help`
+    // documents the templates and effects this binary actually supports.
+    let command = Cli::command()
+        .mut_arg("template", |arg| arg.long_help(template_long_help()))
+        .mut_arg("effects", |arg| arg.long_help(effects_long_help()));
+    let mut cli = match Cli::from_arg_matches(&command.get_matches()) {
+        Ok(cli) => cli,
+        Err(err) => err.exit(),
+    };
 
     // Load config: explicit --config path, or auto-detect sonica.toml / global config
     let config_path = cli.config.clone().or_else(|| {
@@ -129,19 +185,32 @@ fn main() -> Result<()> {
         }
     }
 
-    // List templates mode
+    // List templates mode. Prints the name you pass to -t, not the manifest's
+    // display name, which is not a valid value for the flag.
     if cli.list_templates {
-        let templates = loader::list_templates()?;
-        println!("Available templates:");
-        for name in &templates {
-            if let Ok(t) = loader::load_template(name) {
-                println!("  {:<20} {}", t.manifest.display_name, t.manifest.description);
-            } else {
-                println!("  {}", name);
-            }
+        println!("Available templates (pass with -t/--template):");
+        for (name, description) in template_catalog() {
+            println!("  {name:<20} {description}");
         }
         return Ok(());
     }
+
+    // List effects mode
+    if cli.list_effects {
+        println!("Available effects (pass with --effects, comma-separated):");
+        for (name, description) in render::postprocess::EFFECTS {
+            println!("  {name:<22} {description}");
+        }
+        println!("\nPresets:");
+        for (name, expansion) in render::postprocess::EFFECT_PRESETS {
+            println!("  {name:<22} {expansion}");
+        }
+        return Ok(());
+    }
+
+    // Fail on unknown effect names now rather than warning mid-render and
+    // producing a video that is silently missing the effect.
+    render::postprocess::validate_effects(&cli.effects)?;
 
     let input = cli.input.as_ref().context("Input audio file is required")?;
     if !input.exists() {

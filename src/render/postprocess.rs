@@ -4,6 +4,56 @@ use wgpu;
 
 use super::frame::TEXTURE_FORMAT;
 
+/// Every post-processing effect, in the order the `all` preset applies them.
+/// This is the single source of truth for `--help`, `--list-effects`, and
+/// `--effects` validation; adding a shader to `get_effect_shader` requires a
+/// matching entry here (enforced by `effect_registry_matches_shaders`).
+pub const EFFECTS: &[(&str, &str)] = &[
+    ("bloom", "Soft glow bleeding out of bright areas"),
+    ("crt_scanlines", "Horizontal scanlines with slight screen curvature"),
+    ("chromatic_aberration", "RGB channel split, strongest near the edges"),
+    ("vignette", "Darkens the corners to draw the eye inward"),
+    ("film_grain", "Animated sensor noise (warning: inflates file size)"),
+    ("color_grading", "Cinematic contrast and colour tint"),
+];
+
+/// Shorthand names that expand to several effects (or none at all).
+pub const EFFECT_PRESETS: &[(&str, &str)] = &[
+    (
+        "crt",
+        "crt_scanlines + chromatic_aberration + vignette + film_grain + color_grading",
+    ),
+    ("all", "every effect listed above, in order"),
+    (
+        "none",
+        "no effects at all, overriding the template's defaults",
+    ),
+];
+
+/// Rejects unknown effect names before any expensive work begins.
+///
+/// Unknown names used to only produce a `log::warn!` mid-render, so a typo like
+/// `vignete` yielded a successful video that was silently missing the effect.
+pub fn validate_effects(effects: &[String]) -> Result<()> {
+    for name in effects {
+        let known = EFFECTS.iter().any(|(e, _)| e == name)
+            || EFFECT_PRESETS.iter().any(|(p, _)| p == name);
+        if !known {
+            let all: Vec<&str> = EFFECTS
+                .iter()
+                .chain(EFFECT_PRESETS.iter())
+                .map(|(n, _)| *n)
+                .collect();
+            anyhow::bail!(
+                "Unknown effect '{}'.\nAvailable effects: {}\nRun `sonica --list-effects` for descriptions.",
+                name,
+                all.join(", ")
+            );
+        }
+    }
+    Ok(())
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub struct PostProcessUniforms {
@@ -295,14 +345,7 @@ fn expand_effects(effects: &[String]) -> Vec<String> {
                 ]);
             }
             "all" => {
-                result.extend_from_slice(&[
-                    "bloom".into(),
-                    "crt_scanlines".into(),
-                    "chromatic_aberration".into(),
-                    "vignette".into(),
-                    "film_grain".into(),
-                    "color_grading".into(),
-                ]);
+                result.extend(EFFECTS.iter().map(|(name, _)| name.to_string()));
             }
             other => result.push(other.to_string()),
         }
@@ -481,4 +524,39 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     };
 
     Some(format!("{}{}", common_header, fragment))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The registry drives `--help` and validation, so an effect that has a
+    /// shader but no entry would be undocumented and rejected as a typo.
+    #[test]
+    fn effect_registry_matches_shaders() {
+        for (name, _) in EFFECTS {
+            assert!(
+                get_effect_shader(name).is_some(),
+                "EFFECTS lists '{name}' but get_effect_shader has no shader for it"
+            );
+        }
+    }
+
+    #[test]
+    fn presets_expand_to_known_effects() {
+        for (preset, _) in EFFECT_PRESETS {
+            for name in expand_effects(&[preset.to_string()]) {
+                assert!(
+                    get_effect_shader(&name).is_some(),
+                    "preset '{preset}' expands to unknown effect '{name}'"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn validate_effects_rejects_typos_and_accepts_presets() {
+        assert!(validate_effects(&["vignete".to_string()]).is_err());
+        assert!(validate_effects(&["vignette".to_string(), "crt".to_string()]).is_ok());
+    }
 }
