@@ -1,4 +1,4 @@
-# CLAUDE.md - Sonica Project Guide
+# AGENTS.md - Sonica Project Guide
 
 ## Overview
 
