@@ -24,8 +24,12 @@ Audio File → symphonia decode → 3-pass analysis → Vec<SmoothedFrame>
 1. `SmoothedFrame` → `FrameUniforms` uniform buffer + FFT/waveform storage buffers
 2. Template WGSL shader renders to texture via fullscreen triangle (3 vertices, no vertex buffer)
 3. Optional post-processing passes (ping-pong between two textures)
-4. `copy_texture_to_buffer` → CPU readback (with 256-byte row alignment stripping)
-5. Raw RGBA bytes written to ffmpeg's stdin pipe
+4. `copy_texture_to_buffer` into a 2-deep readback buffer ring (the next
+   frames render while the copy drains; pixels are collected by short
+   non-blocking polls and stripped into one reused Vec)
+5. On collection, the frame's CPU overlays (title/time/subtitle) are applied
+   using the `FrameStamp` carried through the ring, then raw RGBA bytes go to
+   ffmpeg's stdin pipe
 
 ## Key Source Files
 
@@ -37,7 +41,7 @@ Audio File → symphonia decode → 3-pass analysis → Vec<SmoothedFrame>
 | `src/audio/decode.rs` | symphonia → `Vec<f32>` mono PCM |
 | `src/audio/analysis.rs` | 3-pass pipeline: global stats → per-frame FFT (rayon) → bidirectional smoothing |
 | `src/audio/features.rs` | `FrameFeatures`, `SmoothedFrame`, `GlobalAnalysis` structs |
-| `src/render/gpu.rs` | `GpuContext`: headless wgpu init (Metal/Vulkan/DX12) |
+| `src/render/gpu.rs` | `GpuContext`: headless wgpu init (Metal/Vulkan/DX12), `--backend` override |
 | `src/render/pipeline.rs` | `FrameUniforms` (repr(C) Pod), `RenderPipeline` builder |
 | `src/render/frame.rs` | `FrameRenderer`: render target texture + output buffer + readback |
 | `src/render/postprocess.rs` | `PostProcessChain`: ping-pong effect chain, 6 built-in effects |
@@ -87,6 +91,7 @@ Effects are WGSL fragment shaders with their own bind group:
 - `@binding(2)` — linear sampler
 
 Available effects: `bloom`, `chromatic_aberration`, `vignette`, `film_grain`, `crt_scanlines`, `color_grading`
+(any accepts `name:strength` with strength 0.0–10.0, e.g. `bloom:0.4`)
 
 Preset `crt` expands to: scanlines + chromatic_aberration + vignette + film_grain + color_grading
 
@@ -157,12 +162,17 @@ Requires `ffmpeg` in PATH.
 
 ## Performance Notes
 
-On Apple M2 Max:
-- 1080p30 with CRT effects: ~2.3x realtime
-- 720p30 no effects: ~12x realtime
+On Apple M2 Max (10s clip, static measurement conditions of the CLI defaults):
+- 1080p30, no effects: ~5x realtime
+- 1080p30, CRT effects: ~2.9x realtime
+- 720p30, no effects: ~8.8x realtime
 - Audio analysis of 100s file: ~70ms
 
-The bottleneck is the per-frame GPU readback (`map_async` + `poll(Wait)`). A double-buffered readback strategy could improve throughput.
+The old per-frame blocking readback (map poll + `poll(Wait)` per frame) was
+the bottleneck; `FrameRenderer` now pipelines through a 2-deep buffer ring
+with non-blocking collection, reusing one pixel buffer. Do not reintroduce a
+per-frame blocking readback path — keep frames queueing render work while
+copies drain.
 
 ## Not Yet Implemented
 
