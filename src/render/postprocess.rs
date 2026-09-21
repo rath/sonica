@@ -64,9 +64,11 @@ pub struct PostProcessUniforms {
 
 pub struct PostProcessPass {
     pipeline: wgpu::RenderPipeline,
-    bind_group_layout: wgpu::BindGroupLayout,
-    sampler: wgpu::Sampler,
     uniform_buffer: wgpu::Buffer,
+    /// Both ping-pong source variants prebuilt: index 0 reads the ping
+    /// texture, index 1 reads pong. Layouts/views never change for a fixed
+    /// chain, so per-frame `create_bind_group` overhead disappears.
+    bind_groups: [wgpu::BindGroup; 2],
     #[allow(dead_code)]
     name: String,
 }
@@ -116,7 +118,8 @@ impl PostProcessChain {
 
         for effect_name in &expanded {
             if let Some(shader_src) = get_effect_shader(effect_name) {
-                let pass = PostProcessPass::new(device, &shader_src, effect_name)?;
+                let pass =
+                    PostProcessPass::new(device, &shader_src, effect_name, &ping_view, &pong_view)?;
                 passes.push(pass);
             } else {
                 log::warn!("Unknown effect: {}", effect_name);
@@ -156,16 +159,17 @@ impl PostProcessChain {
             return None;
         }
 
-        // Copy input to ping
+        // One submission for the whole chain: the copy plus every effect
+        // pass. The GPU then has the full frame's work available at once
+        // instead of being re-primed n+1 times.
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("pp_copy_encoder"),
+            label: Some("pp_chain_encoder"),
         });
         encoder.copy_texture_to_texture(
             input_texture.as_image_copy(),
             self.ping_texture.as_image_copy(),
             wgpu::Extent3d { width: self.width, height: self.height, depth_or_array_layers: 1 },
         );
-        queue.submit(std::iter::once(encoder.finish()));
 
         let textures = [&self.ping_texture, &self.pong_texture];
         let views = [&self.ping_view, &self.pong_view];
@@ -179,30 +183,9 @@ impl PostProcessChain {
                 time,
                 intensity: 1.0,
             };
+            // write_buffer is stamped in submission order, so the uniform
+            // values shadow everything queued above before this submit runs.
             queue.write_buffer(&pass.uniform_buffer, 0, bytemuck::bytes_of(&uniforms));
-
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("pp_bind_group"),
-                layout: &pass.bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: pass.uniform_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(views[src_idx]),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Sampler(&pass.sampler),
-                    },
-                ],
-            });
-
-            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("pp_encoder"),
-            });
 
             {
                 let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -223,12 +206,12 @@ impl PostProcessChain {
                 });
 
                 render_pass.set_pipeline(&pass.pipeline);
-                render_pass.set_bind_group(0, &bind_group, &[]);
+                render_pass.set_bind_group(0, &pass.bind_groups[src_idx], &[]);
                 render_pass.draw(0..3, 0..1);
             }
-
-            queue.submit(std::iter::once(encoder.finish()));
         }
+
+        queue.submit(std::iter::once(encoder.finish()));
 
         // Return the texture that has the final result
         let final_idx = self.passes.len() % 2;
@@ -237,7 +220,13 @@ impl PostProcessChain {
 }
 
 impl PostProcessPass {
-    fn new(device: &wgpu::Device, shader_source: &str, name: &str) -> Result<Self> {
+    fn new(
+        device: &wgpu::Device,
+        shader_source: &str,
+        name: &str,
+        ping_view: &wgpu::TextureView,
+        pong_view: &wgpu::TextureView,
+    ) -> Result<Self> {
         super::pipeline::with_error_scope(
             device,
             || format!("Effect shader '{name}' failed to compile"),
@@ -329,11 +318,32 @@ impl PostProcessPass {
                     mapped_at_creation: false,
                 });
 
+                let make_bind_group = |src_view: &wgpu::TextureView| {
+                    device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("pp_bind_group"),
+                        layout: &bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: uniform_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::TextureView(src_view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::Sampler(&sampler),
+                            },
+                        ],
+                    })
+                };
+                let bind_groups = [make_bind_group(ping_view), make_bind_group(pong_view)];
+
                 Self {
                     pipeline,
-                    bind_group_layout,
-                    sampler,
                     uniform_buffer,
+                    bind_groups,
                     name: name.to_string(),
                 }
             },
