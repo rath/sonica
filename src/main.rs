@@ -431,7 +431,8 @@ fn main() -> Result<()> {
 
     for (i, name) in template_names.iter().enumerate() {
         let tmpl = loader::load_template(name)?;
-        let shader_src = loader::inject_params(&tmpl.fragment_shader, &tmpl.manifest, &param_overrides);
+        let shader_src =
+            loader::inject_params(&tmpl.fragment_shader, &tmpl.manifest, &param_overrides)?;
         let pipeline = RenderPipeline::new(&gpu.device, &shader_src, TEXTURE_FORMAT)?;
 
         let bind_group = gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -454,7 +455,8 @@ fn main() -> Result<()> {
         });
 
         let compute_pipeline = if let Some(ref compute_src) = tmpl.compute_shader {
-            let compute_src = loader::inject_params(compute_src, &tmpl.manifest, &param_overrides);
+            let compute_src =
+                loader::inject_params(compute_src, &tmpl.manifest, &param_overrides)?;
             Some(ComputePipelineWrapper::new(&gpu.device, &compute_src)?)
         } else {
             None

@@ -28,9 +28,7 @@ pub struct ParamDef {
     pub param_type: String,
     pub default: serde_json::Value,
     #[serde(default)]
-    #[allow(dead_code)]
     pub min: Option<serde_json::Value>,
     #[serde(default)]
-    #[allow(dead_code)]
     pub max: Option<serde_json::Value>,
 }
