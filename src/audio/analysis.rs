@@ -42,29 +42,35 @@ fn pass1_global(samples: &[f32], sample_rate: u32, duration: f32) -> GlobalAnaly
     let fft = planner.plan_fft_forward(FFT_SIZE);
     let hann = hann_window(FFT_SIZE);
 
-    let mut prev_magnitudes = vec![0.0f32; FFT_SIZE / 2];
+    // Every window is exactly FFT_SIZE samples, so the input buffer and the
+    // magnitude buffers are written fully each iteration; swapping with the
+    // previous-magnitude buffer replaces what used to be a fresh pair of
+    // ~1024-element allocations per hop.
+    let mut buffer: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); FFT_SIZE];
+    let mut magnitudes = vec![0.0f32; FFT_SIZE / 2];
+    let mut previous_magnitudes = vec![0.0f32; FFT_SIZE / 2];
     let mut flux_values: Vec<(f32, f32)> = Vec::new(); // (time, flux)
 
     let mut pos = 0;
     while pos + FFT_SIZE <= samples.len() {
-        let mut buffer: Vec<Complex<f32>> = samples[pos..pos + FFT_SIZE]
-            .iter()
-            .enumerate()
-            .map(|(i, &s)| Complex::new(s * hann[i], 0.0))
-            .collect();
+        for (i, &s) in samples[pos..pos + FFT_SIZE].iter().enumerate() {
+            buffer[i] = Complex::new(s * hann[i], 0.0);
+        }
         fft.process(&mut buffer);
 
-        let magnitudes: Vec<f32> = buffer[..FFT_SIZE / 2].iter().map(|c| c.norm()).collect();
+        for (magnitude, bin) in magnitudes.iter_mut().zip(&buffer[..FFT_SIZE / 2]) {
+            *magnitude = bin.norm();
+        }
 
         let flux: f32 = magnitudes
             .iter()
-            .zip(prev_magnitudes.iter())
+            .zip(previous_magnitudes.iter())
             .map(|(cur, prev)| (cur - prev).max(0.0))
             .sum();
 
         let time = pos as f32 / sample_rate as f32;
         flux_values.push((time, flux));
-        prev_magnitudes = magnitudes;
+        std::mem::swap(&mut magnitudes, &mut previous_magnitudes);
         pos += HOP_SIZE;
     }
 
@@ -164,21 +170,30 @@ fn pass2_per_frame(
 
     (0..total_frames)
         .into_par_iter()
-        .map(|frame_idx| {
-            let center = (frame_idx as f32 * samples_per_frame) as usize;
-            let start = center.saturating_sub(FFT_SIZE / 2);
-            let end = (start + FFT_SIZE).min(samples.len());
+        // One planner + scratch buffer per rayon thread, instead of building
+        // a fresh FFT plan (potential butterfly recurrency passes) and
+        // allocating a 2048-slot scratch vector for every frame.
+        .map_init(
+            || {
+                let fft = FftPlanner::<f32>::new().plan_fft_forward(FFT_SIZE);
+                let fft_input = vec![Complex::new(0.0, 0.0); FFT_SIZE];
+                (fft, fft_input)
+            },
+            |(fft, fft_input), frame_idx| {
+                let center = (frame_idx as f32 * samples_per_frame) as usize;
+                let start = center.saturating_sub(FFT_SIZE / 2);
+                let end = (start + FFT_SIZE).min(samples.len());
 
-            // Extract windowed samples
-            let mut fft_input: Vec<Complex<f32>> = vec![Complex::new(0.0, 0.0); FFT_SIZE];
-            for i in 0..(end - start) {
-                fft_input[i] = Complex::new(samples[start + i] * hann[i], 0.0);
-            }
+                // Extract windowed samples (short frames zero-fill the tail)
+                for (i, slot) in fft_input.iter_mut().enumerate() {
+                    *slot = if i < end - start {
+                        Complex::new(samples[start + i] * hann[i], 0.0)
+                    } else {
+                        Complex::new(0.0, 0.0)
+                    };
+                }
 
-            // Per-thread FFT planner (rayon-safe)
-            let mut planner = FftPlanner::<f32>::new();
-            let fft = planner.plan_fft_forward(FFT_SIZE);
-            fft.process(&mut fft_input);
+                fft.process(fft_input);
 
             let half = FFT_SIZE / 2;
             let fft_bins: Vec<f32> = fft_input[..half].iter().map(|c| c.norm()).collect();
@@ -253,7 +268,8 @@ fn pass2_per_frame(
                 spectral_flux: 0.0, // computed in sequential post-pass
                 waveform,
             }
-        })
+            },
+        )
         .collect()
 }
 
