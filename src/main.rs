@@ -341,6 +341,11 @@ fn main() -> Result<()> {
     };
     drop(first_template);
 
+    // Validate the resolved list, not just the CLI args: a typo in a template's
+    // `default_effects` used to slip past validation and only warn mid-render,
+    // silently producing a video missing that effect.
+    render::postprocess::validate_effects(&effects)?;
+
     // 4. Initialize GPU
     log::info!("Initializing GPU...");
     let gpu = GpuContext::new()?;
