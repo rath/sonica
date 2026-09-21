@@ -1,6 +1,7 @@
 use super::cue::{character_count, SubtitleCue};
 use crate::render::text::TextOverlay;
 use anyhow::{Context, Result};
+use std::{cell::RefCell, collections::HashMap};
 
 #[derive(Clone, Debug)]
 pub struct SubtitleStyle {
@@ -62,6 +63,15 @@ pub struct SubtitleRenderer {
     overlay: TextOverlay,
     max_chars_per_line: usize,
     style: SubtitleStyle,
+    /// Layout is resolution-independent (fonts, wrapping, line widths), so
+    /// each cue is laid out once on first activation and re-used every frame
+    /// it is on screen. The per-frame render loop previously re-split,
+    /// re-joined, and re-measured the same strings dozens of times per frame.
+    layouts: RefCell<HashMap<usize, CachedCueLayout>>,
+    /// Running maximum of cue end times, so "no cue is active" resolves with
+    /// a single binary search instead of scanning backwards over every cue
+    /// that started earlier.
+    max_end_prefix: Vec<f32>,
 }
 
 impl SubtitleRenderer {
@@ -71,19 +81,56 @@ impl SubtitleRenderer {
         max_chars_per_line: usize,
         style: SubtitleStyle,
     ) -> Self {
+        // Cues must be sorted by start_time for the binary searches below
+        // (generation sorts; a user SRT is re-sorted by read_srt).
+        let mut cues = cues;
+        cues.sort_by(|a, b| a.start_time.total_cmp(&b.start_time));
+
+        let mut current_max = f32::MIN;
+        let max_end_prefix = cues
+            .iter()
+            .map(|cue| {
+                current_max = current_max.max(cue.end_time);
+                current_max
+            })
+            .collect();
+
         Self {
             cues,
             overlay,
             max_chars_per_line,
             style,
+            layouts: RefCell::new(HashMap::new()),
+            max_end_prefix,
         }
     }
+}
 
+/// One laid-out subtitle line: joined text plus cached geometry.
+struct CachedLine {
+    text: String,
+    width: u32,
+    /// Karaoke-only: the words in reading order.
+    words: Vec<super::transcribe::TimedWord>,
+    /// Karaoke-only: x offset of each word within the line.
+    word_x: Vec<u32>,
+    /// Karaoke-only: measured width of each word.
+    word_w: Vec<u32>,
+}
+
+/// Resolution-independent layout of one cue, built once and reused for every
+/// frame the cue is on screen.
+struct CachedCueLayout {
+    lines: Vec<CachedLine>,
+    bg_w: u32,
+    bg_h: u32,
+}
+
+impl SubtitleRenderer {
     /// Render the active subtitle cue onto the pixel buffer at the given time.
     ///
-    /// Uses karaoke-style rendering: words already spoken are bright white,
-    /// the currently spoken word is partially highlighted based on time progress,
-    /// and upcoming words are rendered in dim white.
+    /// Uses karaoke-style rendering when per-word timing exists and the style
+    /// enables it; otherwise plain rendering.
     pub fn render_frame(
         &self,
         pixels: &mut [u8],
@@ -91,17 +138,100 @@ impl SubtitleRenderer {
         height: u32,
         time: f32,
     ) {
-        let Some(cue) = self.find_active_cue(time) else {
+        let Some(cue_idx) = self.find_active_cue_index(time) else {
             return;
         };
 
-        // If the cue has no per-word timing data, fall back to plain rendering
-        if cue.words.is_empty() || !self.style.karaoke {
-            self.render_plain(pixels, width, height, cue);
-            return;
+        let karaoke = !self.cues[cue_idx].words.is_empty() && self.style.karaoke;
+
+        let layout = self.layout_for(cue_idx);
+
+        if karaoke {
+            self.render_karaoke(pixels, width, height, &layout, time);
+        } else {
+            self.render_plain(pixels, width, height, &layout);
+        }
+    }
+
+    /// Lazily build and memoize the layout for a cue (first time it shows).
+    fn layout_for(&self, cue_idx: usize) -> std::cell::Ref<'_, CachedCueLayout> {
+        {
+            let mut layouts = self.layouts.borrow_mut();
+            layouts
+                .entry(cue_idx)
+                .or_insert_with(|| self.build_layout(cue_idx));
+        }
+        std::cell::Ref::map(self.layouts.borrow(), |map| {
+            map.get(&cue_idx).expect("layout inserted above")
+        })
+    }
+
+    fn build_layout(&self, cue_idx: usize) -> CachedCueLayout {
+        let cue = &self.cues[cue_idx];
+        let font_size = self.overlay.font_size() as u32;
+        let line_spacing = (font_size as f32 * 0.2) as u32;
+        let pad_x = (font_size as f32 * 0.6) as u32;
+        let pad_top = (font_size as f32 * 0.3) as u32;
+        let pad_bottom = (font_size as f32 * 0.55) as u32;
+
+        // Karaoke path: split the timed words into lines; otherwise wrap the
+        // plain text. Both produce joined lines with cached widths.
+        let use_words = !cue.words.is_empty() && self.style.karaoke;
+
+        let mut lines: Vec<CachedLine> = Vec::new();
+        if use_words {
+            for line_words in self.split_words_into_lines(cue) {
+                let text = line_words
+                    .iter()
+                    .map(|w| w.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+
+                // x offsets accumulate: each word starts where the previous
+                // one ended plus one space. measure_width is the sum of the
+                // per-character advances, so this matches measuring the whole
+                // prefix — without the O(n²) prefix re-measures.
+                let mut word_x: Vec<u32> = Vec::with_capacity(line_words.len());
+                let mut word_w: Vec<u32> = Vec::with_capacity(line_words.len());
+                let mut cursor = 0u32;
+                for word in &line_words {
+                    let width = self.overlay.measure_width(&word.text);
+                    word_x.push(cursor);
+                    cursor += width;
+                    word_w.push(width);
+                    cursor += self.overlay.measure_width(" ");
+                }
+
+                lines.push(CachedLine {
+                    width: self.overlay.measure_width(&text),
+                    text,
+                    words: line_words,
+                    word_x,
+                    word_w,
+                });
+            }
+        } else {
+            for text in wrap_text(&cue.text, self.max_chars_per_line) {
+                let width = self.overlay.measure_width(&text);
+                lines.push(CachedLine {
+                    text,
+                    width,
+                    words: Vec::new(),
+                    word_x: Vec::new(),
+                    word_w: Vec::new(),
+                });
+            }
         }
 
-        self.render_karaoke(pixels, width, height, cue, time);
+        let total_text_height = lines.len() as u32 * font_size
+            + lines.len().saturating_sub(1) as u32 * line_spacing;
+        let max_line_width = lines.iter().map(|line| line.width).max().unwrap_or(0);
+
+        CachedCueLayout {
+            bg_w: max_line_width + pad_x * 2,
+            bg_h: total_text_height + pad_top + pad_bottom,
+            lines,
+        }
     }
 
     /// Karaoke-style rendering: dim base layer + bright overlay for spoken words.
@@ -110,38 +240,18 @@ impl SubtitleRenderer {
         pixels: &mut [u8],
         width: u32,
         height: u32,
-        cue: &SubtitleCue,
+        layout: &CachedCueLayout,
         time: f32,
     ) {
         let font_size = self.overlay.font_size() as u32;
         let line_spacing = (font_size as f32 * 0.2) as u32;
 
-        // Split cue words into lines by max_chars
-        let lines = self.split_words_into_lines(cue);
-
-        let total_text_height = lines.len() as u32 * font_size
-            + (lines.len().saturating_sub(1)) as u32 * line_spacing;
-
-        let pad_x = (font_size as f32 * 0.6) as u32;
         let pad_top = (font_size as f32 * 0.3) as u32;
         let pad_bottom = (font_size as f32 * 0.55) as u32;
 
-        // Compute max line width for background box
-        let max_line_width = lines
-            .iter()
-            .map(|words| {
-                let line_text = words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ");
-                self.overlay.measure_width(&line_text)
-            })
-            .max()
-            .unwrap_or(0);
-
-        let bg_w = max_line_width + pad_x * 2;
-        let bg_h = total_text_height + pad_top + pad_bottom;
-
         let margin_bottom = (height as f32 * self.style.margin_bottom) as u32;
-        let bg_y = height.saturating_sub(margin_bottom + bg_h);
-        let bg_x = if bg_w < width { (width - bg_w) / 2 } else { 0 };
+        let bg_y = height.saturating_sub(margin_bottom + layout.bg_h);
+        let bg_x = if layout.bg_w < width { (width - layout.bg_w) / 2 } else { 0 };
 
         TextOverlay::fill_rect(
             pixels,
@@ -149,26 +259,24 @@ impl SubtitleRenderer {
             height,
             bg_x,
             bg_y,
-            bg_w,
-            bg_h,
+            layout.bg_w,
+            layout.bg_h,
             self.style.background_color,
         );
         let text_y = bg_y + pad_top;
 
-        for (i, words) in lines.iter().enumerate() {
-            let line_text: String = words.iter().map(|w| w.text.as_str()).collect::<Vec<_>>().join(" ");
-            let tw = self.overlay.measure_width(&line_text);
-            let line_x = if tw < width { (width - tw) / 2 } else { 0 };
-            let y = text_y + i as u32 * (font_size + line_spacing);
+        for (i, line) in layout.lines.iter().enumerate() {
+            let line_y = text_y + i as u32 * (font_size + line_spacing);
+            let line_x = if line.width < width { (width - line.width) / 2 } else { 0 };
 
             // Pass 1: Draw entire line in dim color
             self.overlay.composite_outlined(
                 pixels,
                 width,
                 height,
-                &line_text,
+                &line.text,
                 line_x,
-                y,
+                line_y,
                 self.style.dim_color,
                 self.style.outline_color,
                 self.style.outline_width,
@@ -179,60 +287,45 @@ impl SubtitleRenderer {
                 pixels,
                 width,
                 height,
-                words,
-                &line_text,
+                line,
                 line_x,
-                y,
+                line_y,
                 time,
                 self.style.highlight_color,
             );
         }
+        let _ = pad_bottom; // bottom padding lives inside layout.bg_h
     }
 
-    /// Render the bright highlight over spoken words in a single line.
+    /// Render the bright highlight over spoken words in a single line,
+    /// driven by the line's cached word positions.
     #[allow(clippy::too_many_arguments)]
     fn render_karaoke_highlight(
         &self,
         pixels: &mut [u8],
         width: u32,
         height: u32,
-        words: &[super::transcribe::TimedWord],
-        line_text: &str,
+        line: &CachedLine,
         line_x: u32,
         y: u32,
         time: f32,
         bright_color: [u8; 4],
     ) {
-        // Calculate per-word x positions within the line
-        let mut word_x_positions: Vec<u32> = Vec::with_capacity(words.len());
-        let mut cursor = 0usize;
-
-        for (wi, word) in words.iter().enumerate() {
-            // Measure x offset of this word within line_text
-            let prefix = &line_text[..cursor];
-            let x_offset = self.overlay.measure_width(prefix);
-            word_x_positions.push(x_offset);
-            cursor += word.text.len();
-            if wi + 1 < words.len() {
-                cursor += 1; // space between words
-            }
-        }
-
-        for (wi, word) in words.iter().enumerate() {
+        for (wi, word) in line.words.iter().enumerate() {
             if time < word.start_time {
                 // This word hasn't started yet — stop highlighting
                 break;
             }
 
-            let word_x = line_x + word_x_positions[wi];
-            let word_width = self.overlay.measure_width(&word.text);
+            let word_x = line_x + line.word_x[wi];
+            let word_width = line.word_w[wi];
 
             if time >= word.end_time {
                 // Word fully spoken — render entirely in bright
                 self.overlay.composite(pixels, width, height, &word.text, word_x, y, bright_color);
 
                 // Also highlight the trailing space if not the last word
-                if wi + 1 < words.len() {
+                if wi + 1 < line.words.len() {
                     let space_x = word_x + word_width;
                     self.overlay.composite(pixels, width, height, " ", space_x, y, bright_color);
                 }
@@ -297,31 +390,15 @@ impl SubtitleRenderer {
         pixels: &mut [u8],
         width: u32,
         height: u32,
-        cue: &SubtitleCue,
+        layout: &CachedCueLayout,
     ) {
-        let lines = wrap_text(&cue.text, self.max_chars_per_line);
-
         let font_size = self.overlay.font_size() as u32;
         let line_spacing = (font_size as f32 * 0.2) as u32;
-        let total_text_height = lines.len() as u32 * font_size
-            + (lines.len().saturating_sub(1)) as u32 * line_spacing;
-
-        let pad_x = (font_size as f32 * 0.6) as u32;
         let pad_top = (font_size as f32 * 0.3) as u32;
-        let pad_bottom = (font_size as f32 * 0.55) as u32;
-
-        let max_line_width = lines
-            .iter()
-            .map(|l| self.overlay.measure_width(l))
-            .max()
-            .unwrap_or(0);
-
-        let bg_w = max_line_width + pad_x * 2;
-        let bg_h = total_text_height + pad_top + pad_bottom;
 
         let margin_bottom = (height as f32 * self.style.margin_bottom) as u32;
-        let bg_y = height.saturating_sub(margin_bottom + bg_h);
-        let bg_x = if bg_w < width { (width - bg_w) / 2 } else { 0 };
+        let bg_y = height.saturating_sub(margin_bottom + layout.bg_h);
+        let bg_x = if layout.bg_w < width { (width - layout.bg_w) / 2 } else { 0 };
 
         TextOverlay::fill_rect(
             pixels,
@@ -329,21 +406,20 @@ impl SubtitleRenderer {
             height,
             bg_x,
             bg_y,
-            bg_w,
-            bg_h,
+            layout.bg_w,
+            layout.bg_h,
             self.style.background_color,
         );
         let text_y = bg_y + pad_top;
 
-        for (i, line) in lines.iter().enumerate() {
-            let tw = self.overlay.measure_width(line);
-            let x = if tw < width { (width - tw) / 2 } else { 0 };
+        for (i, line) in layout.lines.iter().enumerate() {
+            let x = if line.width < width { (width - line.width) / 2 } else { 0 };
             let y = text_y + i as u32 * (font_size + line_spacing);
             self.overlay.composite_outlined(
                 pixels,
                 width,
                 height,
-                line,
+                &line.text,
                 x,
                 y,
                 self.style.text_color,
@@ -353,8 +429,8 @@ impl SubtitleRenderer {
         }
     }
 
-    /// Binary search for the active cue at the given time.
-    fn find_active_cue(&self, time: f32) -> Option<&SubtitleCue> {
+    /// Index of the latest cue that is active at `time`.
+    fn find_active_cue_index(&self, time: f32) -> Option<usize> {
         let idx = self
             .cues
             .partition_point(|c| c.start_time <= time);
@@ -363,12 +439,29 @@ impl SubtitleRenderer {
             return None;
         }
 
-        let cue = &self.cues[idx - 1];
-        if time <= cue.end_time {
-            Some(cue)
-        } else {
-            None
+        // The max of end times over the prefix is monotonically non-decreasing,
+        // so one comparison decides whether ANY earlier-started cue could still
+        // be running; without it, a gap in speech would walk the whole history.
+        if self.max_end_prefix[idx - 1] < time {
+            return None;
         }
+
+        // Overlapping user SRT cues can outlive cues that start later; walk
+        // back to the latest one that ends at/after `time`. For standard
+        // non-overlapping files this is exactly one step.
+        let mut i = idx - 1;
+        while self.cues[i].end_time < time {
+            i -= 1;
+        }
+        Some(i)
+    }
+
+    /// Reference to the active cue at the given time (tests use this to
+    /// exercise the lookup rules directly; the loop uses
+    /// [[SubtitleRenderer::render_frame]]).
+    #[cfg(test)]
+    fn find_active_cue(&self, time: f32) -> Option<&SubtitleCue> {
+        self.find_active_cue_index(time).map(|idx| &self.cues[idx])
     }
 }
 
@@ -586,5 +679,43 @@ mod tests {
                 .join(" ");
             assert!(character_count(&text) <= 13);
         }
+    }
+
+    #[test]
+    fn overlapping_cues_keep_the_latest_active_one() {
+        // Both are on screen at t=4.0; the cue that started later wins.
+        let cues = vec![
+            make_cue("first", 1.0, 5.0, vec![]),
+            make_cue("second", 3.0, 6.0, vec![]),
+        ];
+        let overlay = TextOverlay::new(24.0, None, None, None);
+        let renderer = SubtitleRenderer::new(cues, overlay, 42, SubtitleStyle::default());
+
+        assert_eq!(renderer.find_active_cue(4.0).unwrap().text, "second");
+    }
+
+    #[test]
+    fn long_gap_after_many_cues_resolves_to_none() {
+        let cues: Vec<SubtitleCue> = (0..200)
+            .map(|i| make_cue("x", i as f32, i as f32 + 0.5, vec![]))
+            .collect();
+        let overlay = TextOverlay::new(24.0, None, None, None);
+        let renderer = SubtitleRenderer::new(cues, overlay, 42, SubtitleStyle::default());
+
+        assert!(renderer.find_active_cue(300.0).is_none());
+    }
+
+    #[test]
+    fn overlapping_cue_than_ended_yet_still_active_cue_is_found() {
+        // Cue 2 (later start) ends at 3.5, but cue 1 still runs until 5.0:
+        // at t=4.0 the earlier cue is the only active one.
+        let cues = vec![
+            make_cue("longer", 1.0, 5.0, vec![]),
+            make_cue("short", 3.0, 3.5, vec![]),
+        ];
+        let overlay = TextOverlay::new(24.0, None, None, None);
+        let renderer = SubtitleRenderer::new(cues, overlay, 42, SubtitleStyle::default());
+
+        assert_eq!(renderer.find_active_cue(4.0).unwrap().text, "longer");
     }
 }
