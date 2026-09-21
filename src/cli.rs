@@ -12,6 +12,9 @@ EXAMPLES:
   # Pick a look, add effects (see --list-templates / --list-effects)
   sonica track.wav -t circular_spectrum --effects crt
 
+  # Dial an effect's intensity per effect (or for a whole preset)
+  sonica track.wav --effects "crt:0.6,bloom"
+
   # Strip the template's default effects
   sonica track.wav -t kaleidoscope --effects none
 
@@ -59,6 +62,7 @@ pub struct Cli {
     pub template: String,
 
     /// Post-processing effects, comma-separated; see --list-effects
+    /// (append `:0.0`–`10.0` to scale one, e.g. `bloom:0.4`)
     #[arg(long, value_delimiter = ',', help_heading = "Visuals")]
     pub effects: Vec<String>,
 

@@ -35,9 +35,11 @@ pub const EFFECT_PRESETS: &[(&str, &str)] = &[
 /// Unknown names used to only produce a `log::warn!` mid-render, so a typo like
 /// `vignete` yielded a successful video that was silently missing the effect.
 pub fn validate_effects(effects: &[String]) -> Result<()> {
-    for name in effects {
-        let known = EFFECTS.iter().any(|(e, _)| e == name)
-            || EFFECT_PRESETS.iter().any(|(p, _)| p == name);
+    for spec in effects {
+        let (name, strength) = parse_effect_spec(spec)
+            .map_err(|err| anyhow::anyhow!("{err}\n(effect was '{spec}')"))?;
+        let known = EFFECTS.iter().any(|(e, _)| *e == name)
+            || EFFECT_PRESETS.iter().any(|(p, _)| *p == name);
         if !known {
             let all: Vec<&str> = EFFECTS
                 .iter()
@@ -50,8 +52,49 @@ pub fn validate_effects(effects: &[String]) -> Result<()> {
                 all.join(", ")
             );
         }
+        let _ = strength;
     }
     Ok(())
+}
+
+/// Parse one `name` or `name:strength` spec into its parts.
+///
+/// `name` must be lower-case alnum/underscore (matches the effect ids);
+/// strength is finite and in 0.0..=10.0, because WGSL intensities are
+/// multipliers — negatives or silly magnitudes are typos, not intent.
+fn parse_effect_spec(spec: &str) -> Result<(String, f32)> {
+    let (name, strength_str) = match spec.split_once(':') {
+        Some((n, s)) => (n, s),
+        None => (spec, ""),
+    };
+
+    if !name
+        .bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        || name.is_empty()
+    {
+        anyhow::bail!("Invalid effect name '{name}'");
+    }
+
+    if strength_str.is_empty() {
+        return Ok((name.to_string(), 1.0));
+    }
+
+    let strength: f32 = strength_str
+        .parse()
+        .map_err(|_| anyhow::anyhow!("Invalid effect strength '{strength_str}'"))?;
+    if !strength.is_finite() || !(0.0..=10.0).contains(&strength) {
+        anyhow::bail!("Effect strength must be between 0.0 and 10.0, got {strength}");
+    }
+
+    Ok((name.to_string(), strength))
+}
+
+/// One expanded effect with its strength multiplier.
+#[derive(Clone, Debug)]
+pub struct EffectSpec {
+    pub name: String,
+    pub strength: f32,
 }
 
 #[repr(C)]
@@ -65,6 +108,8 @@ pub struct PostProcessUniforms {
 pub struct PostProcessPass {
     pipeline: wgpu::RenderPipeline,
     uniform_buffer: wgpu::Buffer,
+    #[allow(dead_code)]
+    strength: f32,
     /// Both ping-pong source variants prebuilt: index 0 reads the ping
     /// texture, index 1 reads pong. Layouts/views never change for a fixed
     /// chain, so per-frame `create_bind_group` overhead disappears.
@@ -113,16 +158,23 @@ impl PostProcessChain {
 
         let mut passes = Vec::new();
 
-        // Expand presets
-        let expanded = expand_effects(effects);
+        // Expand presets and parse `name:strength` specs; errors explain
+        // which spec string was bad.
+        let expanded = expand_effects(effects)?;
 
-        for effect_name in &expanded {
-            if let Some(shader_src) = get_effect_shader(effect_name) {
-                let pass =
-                    PostProcessPass::new(device, &shader_src, effect_name, &ping_view, &pong_view)?;
+        for effect in &expanded {
+            if let Some(shader_src) = get_effect_shader(&effect.name) {
+                let pass = PostProcessPass::new(
+                    device,
+                    &shader_src,
+                    &effect.name,
+                    effect.strength,
+                    &ping_view,
+                    &pong_view,
+                )?;
                 passes.push(pass);
             } else {
-                log::warn!("Unknown effect: {}", effect_name);
+                log::warn!("Unknown effect: {}", effect.name);
             }
         }
 
@@ -181,7 +233,7 @@ impl PostProcessChain {
             let uniforms = PostProcessUniforms {
                 resolution: [self.width as f32, self.height as f32],
                 time,
-                intensity: 1.0,
+                intensity: pass.strength,
             };
             // write_buffer is stamped in submission order, so the uniform
             // values shadow everything queued above before this submit runs.
@@ -224,6 +276,7 @@ impl PostProcessPass {
         device: &wgpu::Device,
         shader_source: &str,
         name: &str,
+        strength: f32,
         ping_view: &wgpu::TextureView,
         pong_view: &wgpu::TextureView,
     ) -> Result<Self> {
@@ -343,6 +396,7 @@ impl PostProcessPass {
                 Self {
                     pipeline,
                     uniform_buffer,
+                    strength,
                     bind_groups,
                     name: name.to_string(),
                 }
@@ -351,27 +405,40 @@ impl PostProcessPass {
     }
 }
 
-fn expand_effects(effects: &[String]) -> Vec<String> {
+fn expand_effects(effects: &[String]) -> Result<Vec<EffectSpec>, anyhow::Error> {
     let mut result = Vec::new();
-    for e in effects {
-        match e.as_str() {
-            "none" => return Vec::new(),
+    for spec_str in effects {
+        let (name, strength) = parse_effect_spec(spec_str)?;
+        match name.as_str() {
+            "none" => return Ok(Vec::new()),
+            // Preset strength scales every member of the preset.
             "crt" => {
-                result.extend_from_slice(&[
-                    "crt_scanlines".into(),
-                    "chromatic_aberration".into(),
-                    "vignette".into(),
-                    "film_grain".into(),
-                    "color_grading".into(),
-                ]);
+                for member in [
+                    "crt_scanlines",
+                    "chromatic_aberration",
+                    "vignette",
+                    "film_grain",
+                    "color_grading",
+                ] {
+                    result.push(EffectSpec {
+                        name: member.into(),
+                        strength,
+                    });
+                }
             }
             "all" => {
-                result.extend(EFFECTS.iter().map(|(name, _)| name.to_string()));
+                result.extend(EFFECTS.iter().map(|(name, _)| EffectSpec {
+                    name: name.to_string(),
+                    strength,
+                }));
             }
-            other => result.push(other.to_string()),
+            _ => result.push(EffectSpec {
+                name,
+                strength,
+            }),
         }
     }
-    result
+    Ok(result)
 }
 
 fn get_effect_shader(name: &str) -> Option<String> {
@@ -569,10 +636,11 @@ mod tests {
     #[test]
     fn presets_expand_to_known_effects() {
         for (preset, _) in EFFECT_PRESETS {
-            for name in expand_effects(&[preset.to_string()]) {
+            for spec in expand_effects(&[preset.to_string()]).unwrap() {
                 assert!(
-                    get_effect_shader(&name).is_some(),
-                    "preset '{preset}' expands to unknown effect '{name}'"
+                    get_effect_shader(&spec.name).is_some(),
+                    "preset '{preset}' expands to unknown effect '{}'",
+                    spec.name
                 );
             }
         }
@@ -582,6 +650,29 @@ mod tests {
     fn validate_effects_rejects_typos_and_accepts_presets() {
         assert!(validate_effects(&["vignete".to_string()]).is_err());
         assert!(validate_effects(&["vignette".to_string(), "crt".to_string()]).is_ok());
+    }
+
+    #[test]
+    fn effect_strength_specs_parse_and_validate() {
+        assert!(validate_effects(&["bloom:0.5".to_string()]).is_ok());
+        assert!(validate_effects(&["crt:2.0".to_string()]).is_ok());
+        assert!(validate_effects(&["bloom:0".to_string()]).is_ok());
+        // Out of range / unparsable / unnamed
+        assert!(validate_effects(&["bloom:11".to_string()]).is_err());
+        assert!(validate_effects(&["bloom:-1".to_string()]).is_err());
+        assert!(validate_effects(&["bloom:abc".to_string()]).is_err());
+        assert!(validate_effects(&[":0.5".to_string()]).is_err());
+        assert!(validate_effects(&["bloom:".to_string()]).is_ok()); // empty strength == 1.0
+
+        let expanded = expand_effects(&["bloom:0.5".to_string()]).unwrap();
+        assert_eq!(expanded.len(), 1);
+        assert_eq!(expanded[0].name, "bloom");
+        assert_eq!(expanded[0].strength, 0.5);
+
+        // Preset scaling propagates to all members.
+        let crt = expand_effects(&["crt:0.4".to_string()]).unwrap();
+        assert_eq!(crt.len(), 5);
+        assert!(crt.iter().all(|spec| spec.strength == 0.4));
     }
 
     /// Full naga validation (uniformity rules, types, addressing) of every

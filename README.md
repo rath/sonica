@@ -148,6 +148,18 @@ sonica audio.wav --effects crt
 
 Available effects: `bloom`, `chromatic_aberration`, `vignette`, `film_grain`, `crt_scanlines`, `color_grading`
 
+Presets: `crt` (scanlines + chromatic aberration + vignette + film grain + color grading), `all`.
+
+Any effect or preset accepts a strength multiplier as `name:0.0`–`name:10.0`:
+
+```sh
+# Softer film grain, normal bloom
+sonica audio.wav --effects "film_grain:0.4,bloom"
+
+# Scale a whole preset
+sonica audio.wav --effects "crt:0.6"
+```
+
 When `--effects` is not specified, each template uses its own default effects.
 
 ## Subtitles
