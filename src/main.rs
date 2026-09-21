@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use cli::Cli;
 use render::gpu::GpuContext;
 use render::pipeline::{ComputePipelineWrapper, FrameUniforms, RenderPipeline};
-use render::frame::{FrameRenderer, TEXTURE_FORMAT};
+use render::frame::{FrameRenderer, FrameStamp, TEXTURE_FORMAT};
 use render::postprocess::PostProcessChain;
 use render::text::{load_font_from_url, TextOverlay};
 use encode::ffmpeg::FfmpegEncoder;
@@ -386,7 +386,7 @@ fn main() -> Result<()> {
     // 4. Initialize GPU
     log::info!("Initializing GPU...");
     let gpu = GpuContext::new()?;
-    let frame_renderer = FrameRenderer::new(&gpu, cli.width, cli.height);
+    let mut frame_renderer = FrameRenderer::new(&gpu, cli.width, cli.height);
 
     // 5. Create shared GPU buffers
     let uniform_buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
@@ -596,7 +596,22 @@ fn main() -> Result<()> {
             .progress_chars("=>-"),
     );
 
+
+
+
     let mut current_slot_idx = 0;
+
+    let emitters = FrameEmitters {
+        title: cli.title.as_deref(),
+        show_time: cli.show_time,
+        overlay: text_overlay.as_ref(),
+        #[cfg(feature = "subtitles")]
+        subtitle: subtitle_renderer.as_ref(),
+        width: cli.width,
+        height: cli.height,
+    };
+
+    let mut pixels: Vec<u8> = Vec::new();
 
     for (frame_idx, frame) in frames.iter().enumerate() {
         // Advance to the correct template slot
@@ -607,6 +622,16 @@ fn main() -> Result<()> {
             log::info!("Switching to template: {}", slots[current_slot_idx].name);
         }
         let slot = &slots[current_slot_idx];
+
+        // Drain the ring to a free slot; collect_oldest returns frames in
+        // submission order, so stamp.index matches frame_idx.
+        while !frame_renderer.has_free_slot() {
+            let stamp = frame_renderer.collect_oldest(&gpu, &mut pixels)?;
+            let stamp = stamp.ok_or_else(|| anyhow::anyhow!(
+                "Readback ring inconsistent: pending frame disappeared"
+            ))?;
+            emitters.emit(stamp, &mut pixels, &mut encoder, &pb)?;
+        }
 
         // Update uniforms
         let uniforms = build_uniforms(frame, frame_idx as u32, cli.width, cli.height, cli.fps, global.duration);
@@ -620,58 +645,28 @@ fn main() -> Result<()> {
             // Requires output buffer binding and workgroup size configuration
         }
 
-        // Render. With post-processing, skip reading the template pass result
-        // back to the CPU — only the post-processed texture is read back, and
-        // all GPU work since the last readback is drained by that one wait.
-        let mut pixels = if pp_chain.has_effects() {
-            frame_renderer.render(&gpu, &slot.pipeline.pipeline, &slot.bind_group)?;
-            let final_texture = pp_chain.run(
-                &gpu.device,
-                &gpu.queue,
-                &frame_renderer.render_texture,
-                frame.time,
-            );
-            frame_renderer.readback_texture(&gpu, final_texture)?
-        } else {
-            frame_renderer.render_and_readback(&gpu, &slot.pipeline.pipeline, &slot.bind_group)?
+        // Render the template (and post-processing) and queue its pixels for
+        // asynchronous readback; the next frames render while the copy drains.
+        frame_renderer.render(&gpu, &slot.pipeline.pipeline, &slot.bind_group)?;
+        let stamp = FrameStamp {
+            index: frame_idx as u32,
+            time: frame.time,
         };
-
-        // Text overlay compositing
-        if let Some(ref overlay) = text_overlay {
-            let color = [255u8, 255, 255, 220];
-            let shorter = cli.width.min(cli.height) as f32;
-            let margin = (shorter * 0.07) as u32;
-
-            if let Some(ref title) = cli.title {
-                let tw = overlay.measure_width(title);
-                let tx = cli.width - margin - tw;
-                let ty = margin;
-                overlay.composite(&mut pixels, cli.width, cli.height, title, tx, ty, color);
-            }
-
-            if cli.show_time {
-                let total_secs = frame.time as u64;
-                let centis = ((frame.time - total_secs as f32) * 100.0) as u64;
-                let time_str = if total_secs >= 3600 {
-                    format!("{:02}:{:02}:{:02}.{:02}", total_secs / 3600, (total_secs % 3600) / 60, total_secs % 60, centis)
-                } else {
-                    format!("{:02}:{:02}.{:02}", total_secs / 60, total_secs % 60, centis)
-                };
-                let tw = overlay.measure_width(&time_str);
-                let tx = cli.width - margin - tw;
-                let ty = cli.height - margin - overlay.line_height();
-                overlay.composite(&mut pixels, cli.width, cli.height, &time_str, tx, ty, color);
-            }
+        let pp_final = pp_chain.run(
+            &gpu.device,
+            &gpu.queue,
+            &frame_renderer.render_texture,
+            frame.time,
+        );
+        match pp_final {
+            Some(texture) => frame_renderer.queue_readback(&gpu, &texture, stamp)?,
+            None => frame_renderer.queue_render_target_readback(&gpu, stamp)?,
         }
+    }
 
-        // Subtitle overlay
-        #[cfg(feature = "subtitles")]
-        if let Some(ref sub) = subtitle_renderer {
-            sub.render_frame(&mut pixels, cli.width, cli.height, frame.time);
-        }
-
-        encoder.write_frame(&pixels)?;
-        pb.set_position(frame_idx as u64 + 1);
+    // Drain any frames still queued when the audio ran out
+    while let Some(stamp) = frame_renderer.collect_oldest(&gpu, &mut pixels)? {
+        emitters.emit(stamp, &mut pixels, &mut encoder, &pb)?;
     }
 
     pb.finish_with_message("Rendering complete");
@@ -682,6 +677,60 @@ fn main() -> Result<()> {
 
     log::info!("Done! Output: {}", cli.output.display());
     Ok(())
+}
+
+/// Context needed to composite a finished frame on the CPU and hand it to
+/// ffmpeg, captured once so both collect sites share the emission logic.
+struct FrameEmitters<'a> {
+    title: Option<&'a str>,
+    show_time: bool,
+    overlay: Option<&'a TextOverlay>,
+    #[cfg(feature = "subtitles")]
+    subtitle: Option<&'a subtitle::render::SubtitleRenderer>,
+    width: u32,
+    height: u32,
+}
+
+impl FrameEmitters<'_> {
+    fn emit(&self, stamp: FrameStamp, pixels: &mut [u8], encoder: &mut FfmpegEncoder, pb: &indicatif::ProgressBar) -> Result<()> {
+        // Text overlay compositing
+        if let Some(overlay) = self.overlay {
+            let color = [255u8, 255, 255, 220];
+            let shorter = self.width.min(self.height) as f32;
+            let margin = (shorter * 0.07) as u32;
+
+            if let Some(title) = self.title {
+                let tw = overlay.measure_width(title);
+                let tx = self.width - margin - tw;
+                let ty = margin;
+                overlay.composite(pixels, self.width, self.height, title, tx, ty, color);
+            }
+
+            if self.show_time {
+                let total_secs = stamp.time as u64;
+                let centis = ((stamp.time - total_secs as f32) * 100.0) as u64;
+                let time_str = if total_secs >= 3600 {
+                    format!("{:02}:{:02}:{:02}.{:02}", total_secs / 3600, (total_secs % 3600) / 60, total_secs % 60, centis)
+                } else {
+                    format!("{:02}:{:02}.{:02}", total_secs / 60, total_secs % 60, centis)
+                };
+                let tw = overlay.measure_width(&time_str);
+                let tx = self.width - margin - tw;
+                let ty = self.height - margin - overlay.line_height();
+                overlay.composite(pixels, self.width, self.height, &time_str, tx, ty, color);
+            }
+        }
+
+        // Subtitle overlay
+        #[cfg(feature = "subtitles")]
+        if let Some(sub) = self.subtitle {
+            sub.render_frame(pixels, self.width, self.height, stamp.time);
+        }
+
+        encoder.write_frame(pixels)?;
+        pb.set_position(stamp.index as u64 + 1);
+        Ok(())
+    }
 }
 
 fn build_uniforms(

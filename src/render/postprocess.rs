@@ -140,16 +140,20 @@ impl PostProcessChain {
 
     /// Run the post-processing chain.
     /// Input texture is copied to ping, then ping-pong through passes.
-    /// Returns the view of the final output texture.
-    pub fn run<'a>(
-        &'a self,
+    ///
+    /// Returns `Some` with the final result texture when passes ran, `None`
+    /// when the chain is empty (the input texture is already the output).
+    /// The returned handle is owned, so it does not borrow the chain or the
+    /// input — callers may then take `&mut` on the frame renderer.
+    pub fn run(
+        &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        input_texture: &'a wgpu::Texture,
+        input_texture: &wgpu::Texture,
         time: f32,
-    ) -> &'a wgpu::Texture {
+    ) -> Option<wgpu::Texture> {
         if self.passes.is_empty() {
-            return input_texture;
+            return None;
         }
 
         // Copy input to ping
@@ -228,7 +232,7 @@ impl PostProcessChain {
 
         // Return the texture that has the final result
         let final_idx = self.passes.len() % 2;
-        textures[final_idx]
+        Some(textures[final_idx].clone())
     }
 }
 

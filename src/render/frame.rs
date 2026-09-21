@@ -1,16 +1,46 @@
 use anyhow::Result;
+use std::collections::VecDeque;
+use std::sync::mpsc::Receiver;
+use std::time::Duration;
+
 use super::gpu::GpuContext;
 
 pub const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
+/// How many frames may be in flight between GPU render and CPU readback.
+///
+/// Without pipelining, every frame waits for its own copy, serializing the GPU
+/// and the CPU on the readback (the profiled bottleneck). Two buffers let the
+/// next frame render while the current frame's copy drains; one instant of
+/// extra latency, doubled throughput.
+const FRAME_LAG: usize = 2;
+
+/// Identifies a queued render so the CPU can composite overlays onto the
+/// correct frame when its pixels finally read back.
+#[derive(Clone, Copy, Debug)]
+pub struct FrameStamp {
+    /// Frame number within the whole render (matches the loop index order).
+    pub index: u32,
+    /// Timestamp of this frame's audio slice, in seconds.
+    pub time: f32,
+}
+
 pub struct FrameRenderer {
     pub render_texture: wgpu::Texture,
     pub render_texture_view: wgpu::TextureView,
-    pub output_buffer: wgpu::Buffer,
-    pub width: u32,
-    pub height: u32,
-    pub padded_bytes_per_row: u32,
-    pub unpadded_bytes_per_row: u32,
+    /// Ring of GPU→CPU staging buffers; `slot` rotates across submissions.
+    output_buffers: Vec<wgpu::Buffer>,
+    pending: VecDeque<PendingReadback>,
+    width: u32,
+    height: u32,
+    padded_bytes_per_row: u32,
+    unpadded_bytes_per_row: u32,
+}
+
+struct PendingReadback {
+    slot: usize,
+    receiver: Receiver<Result<(), wgpu::BufferAsyncError>>,
+    stamp: FrameStamp,
 }
 
 impl FrameRenderer {
@@ -38,17 +68,22 @@ impl FrameRenderer {
         let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
         let padded_bytes_per_row = unpadded_bytes_per_row.div_ceil(align) * align;
 
-        let output_buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("output_buffer"),
-            size: (padded_bytes_per_row * height) as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
+        let output_buffers = (0..FRAME_LAG)
+            .map(|slot| {
+                gpu.device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some(&format!("readback_buffer_{slot}")),
+                    size: (padded_bytes_per_row * height) as u64,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                    mapped_at_creation: false,
+                })
+            })
+            .collect();
 
         Self {
             render_texture,
             render_texture_view,
-            output_buffer,
+            output_buffers,
+            pending: VecDeque::new(),
             width,
             height,
             padded_bytes_per_row,
@@ -56,10 +91,13 @@ impl FrameRenderer {
         }
     }
 
+    /// True when queue_readback can be called without exhausting the ring;
+    /// otherwise one collect_oldest must run first.
+    pub fn has_free_slot(&self) -> bool {
+        self.pending.len() < self.output_buffers.len()
+    }
+
     /// Render the template into `render_texture` without reading it back.
-    ///
-    /// Reading this texture out would be wasted work when post-processing is
-    /// enabled, because only the post-processed result is read back.
     pub fn render(
         &self,
         gpu: &GpuContext,
@@ -97,23 +135,23 @@ impl FrameRenderer {
         Ok(())
     }
 
-    /// Render the template and read the result back from `render_texture`.
-    pub fn render_and_readback(
-        &self,
-        gpu: &GpuContext,
-        pipeline: &wgpu::RenderPipeline,
-        bind_group: &wgpu::BindGroup,
-    ) -> Result<Vec<u8>> {
-        self.render(gpu, pipeline, bind_group)?;
-        self.readback_texture(gpu, &self.render_texture)
-    }
-
-    /// Read back pixels from an arbitrary texture (e.g. post-processing output)
-    pub fn readback_texture(
-        &self,
+    /// Queue an async copy of `texture` into the next ring slot.
+    ///
+    /// The readback does not block; call [`FrameRenderer::collect_oldest`] to
+    /// drain completed frames in FIFO order.
+    pub fn queue_readback(
+        &mut self,
         gpu: &GpuContext,
         texture: &wgpu::Texture,
-    ) -> Result<Vec<u8>> {
+        stamp: FrameStamp,
+    ) -> Result<()> {
+        if self.pending.len() >= self.output_buffers.len() {
+            anyhow::bail!(
+                "readback ring exhausted ({} frames in flight); collect_oldest before queueing more",
+                self.pending.len()
+            );
+        }
+
         // wgpu validation errors on a size/format mismatch surface as panics far
         // from the cause, so reject it here with a descriptive error instead.
         if texture.width() != self.width
@@ -131,6 +169,15 @@ impl FrameRenderer {
             );
         }
 
+        let slot = self.pending.len();
+        let slot = if let Some(oldest_free) = (0..self.output_buffers.len())
+            .find(|slot| self.pending.iter().all(|p| p.slot != *slot))
+        {
+            oldest_free
+        } else {
+            slot
+        };
+
         let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("readback_encoder"),
         });
@@ -143,7 +190,7 @@ impl FrameRenderer {
                 aspect: wgpu::TextureAspect::All,
             },
             wgpu::TexelCopyBufferInfo {
-                buffer: &self.output_buffer,
+                buffer: &self.output_buffers[slot],
                 layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(self.padded_bytes_per_row),
@@ -159,24 +206,88 @@ impl FrameRenderer {
 
         gpu.queue.submit(std::iter::once(encoder.finish()));
 
-        let buffer_slice = self.output_buffer.slice(..);
+        let buffer_slice = self.output_buffers[slot].slice(..);
         let (sender, receiver) = std::sync::mpsc::channel();
         buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
-            sender.send(result).unwrap();
+            // Never unwrap inside a map callback: a dropped receiver would
+            // abort the whole process during an unrelated poll.
+            let _ = sender.send(result);
         });
-        gpu.device.poll(wgpu::PollType::wait_indefinitely())?;
-        receiver.recv()??;
 
+        self.pending.push_back(PendingReadback {
+            slot,
+            receiver,
+            stamp,
+        });
+
+        Ok(())
+    }
+
+    /// Collect the oldest frame whose copy has completed, writing its pixels
+    /// into `out` and returning its stamp.
+    ///
+    /// Waits by spinning short non-blocking polls — the GPU is still busy
+    /// rendering the following frames, so a blocking poll here would stall
+    /// the pipeline and defeat the point of the ring.
+    pub fn collect_oldest(
+        &mut self,
+        gpu: &GpuContext,
+        out: &mut Vec<u8>,
+    ) -> Result<Option<FrameStamp>> {
+        let Some(pending) = self.pending.front() else {
+            return Ok(None);
+        };
+        let slot = pending.slot;
+
+        // The map callback fires only while the device is being polled, so
+        // drive it with non-blocking polls instead of a blocking wait.
+        let map_result = loop {
+            match pending.receiver.try_recv() {
+                Ok(result) => break result,
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    gpu.device.poll(wgpu::PollType::Poll)?;
+                    std::thread::sleep(Duration::from_micros(200));
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    // The callback always sends exactly once, so a disconnect
+                    // means the callback panicked; surface it as an error.
+                    anyhow::bail!("readback map callback never produced a result");
+                }
+            }
+        };
+        map_result?;
+
+        let buffer_slice = self.output_buffers[slot].slice(..);
         let data = buffer_slice.get_mapped_range()?;
-        let mut pixels = Vec::with_capacity((self.unpadded_bytes_per_row * self.height) as usize);
+
+        out.clear();
+        out.reserve((self.unpadded_bytes_per_row * self.height) as usize);
         for row in 0..self.height {
             let start = (row * self.padded_bytes_per_row) as usize;
             let end = start + self.unpadded_bytes_per_row as usize;
-            pixels.extend_from_slice(&data[start..end]);
+            out.extend_from_slice(&data[start..end]);
         }
-        drop(data);
-        self.output_buffer.unmap();
 
-        Ok(pixels)
+        drop(data);
+        self.output_buffers[slot].unmap();
+
+        Ok(self.pending.pop_front().map(|p| p.stamp))
+    }
+}
+
+impl FrameRenderer {
+    /// Queue a readback of this renderer's own render target. A borrowed
+    /// variant exists in [`Self::queue_readback`], but calling that with
+    /// `&self.render_texture` would keep an immutable borrow alive during the
+    /// internal `&mut` bookkeeping.
+    pub fn queue_render_target_readback(
+        &mut self,
+        gpu: &GpuContext,
+        stamp: FrameStamp,
+    ) -> Result<()> {
+        // Deref the field before the &mut call so the borrow checker sees the
+        // two operations as sequential.
+        let texture = self.render_texture.clone();
+        self.queue_readback(gpu, &texture, stamp)
     }
 }
