@@ -6,8 +6,11 @@ use std::process::{Child, Command, Stdio};
 use std::thread::JoinHandle;
 
 pub struct FfmpegEncoder {
-    child: Child,
+    child: Option<Child>,
     stderr_reader: Option<JoinHandle<std::io::Result<Vec<u8>>>>,
+    /// Exact RGBA size of a frame, so a wrong-sized buffer fails loudly
+    /// instead of silently corrupting every frame after it.
+    frame_bytes: usize,
 }
 
 impl FfmpegEncoder {
@@ -53,22 +56,79 @@ impl FfmpegEncoder {
         log::info!("FFmpeg encoder started: {}x{} @ {}fps, codec={}", width, height, fps, codec);
 
         Ok(Self {
-            child,
+            child: Some(child),
             stderr_reader: Some(stderr_reader),
+            frame_bytes: (width as usize) * (height as usize) * 4,
         })
     }
 
+    /// Kill the child (if it somehow outlived the error) and return the
+    /// diagnostic tail from its stderr, so a mid-render death names the cause
+    /// instead of surfacing later as a bare "broken pipe".
+    fn take_diagnostics(&mut self) -> String {
+        let _ = self.child.as_mut().map(|c| c.kill());
+        let _ = self.child.take().map(|mut c| c.wait());
+        let stderr = self
+            .stderr_reader
+            .take()
+            .and_then(|handle| handle.join().ok())
+            .and_then(|result| result.ok())
+            .map(|bytes| {
+                let text = String::from_utf8_lossy(&bytes).into_owned();
+                if text.len() > 4096 {
+                    // Keep the tail: ffmpeg's actual error line comes last.
+                    text[text.len() - 4096..].to_string()
+                } else {
+                    text
+                }
+            })
+            .unwrap_or_default();
+        if stderr.trim().is_empty() {
+            String::new()
+        } else {
+            format!("\nFFmpeg stderr:\n{}", stderr.trim_end())
+        }
+    }
+
     pub fn write_frame(&mut self, rgba_pixels: &[u8]) -> Result<()> {
-        let stdin = self.child.stdin.as_mut().context("FFmpeg stdin not available")?;
-        stdin.write_all(rgba_pixels).context("Failed to write frame to ffmpeg")?;
+        if rgba_pixels.len() != self.frame_bytes {
+            anyhow::bail!(
+                "Frame buffer is {} bytes, but ffmpeg expects {} bytes per {}-pixel RGBA frame",
+                rgba_pixels.len(),
+                self.frame_bytes,
+                self.frame_bytes / 4
+            );
+        }
+        let Some(stdin) = self.child.as_mut().and_then(|c| c.stdin.as_mut()) else {
+            anyhow::bail!(
+                "ffmpeg encoder is no longer running; the process exited earlier{}",
+                self.take_diagnostics()
+            );
+        };
+        if let Err(err) = stdin.write_all(rgba_pixels) {
+            anyhow::bail!(
+                "Failed to write frame to ffmpeg: {}{}",
+                err,
+                self.take_diagnostics()
+            );
+        }
         Ok(())
     }
 
     pub fn finish(mut self) -> Result<()> {
         // Close stdin to signal EOF
-        drop(self.child.stdin.take());
+        if let Some(ref mut child) = self.child {
+            drop(child.stdin.take());
+        }
 
-        let status = self.child.wait().context("Failed to wait for ffmpeg")?;
+        let status = self
+            .child
+            .as_mut()
+            .context("ffmpeg encoder is no longer running")?
+            .wait()
+            .context("Failed to wait for ffmpeg")?;
+        self.child = None;
+
         let stderr = self
             .stderr_reader
             .take()
@@ -84,6 +144,17 @@ impl FfmpegEncoder {
 
         log::info!("FFmpeg encoding complete");
         Ok(())
+    }
+}
+
+impl Drop for FfmpegEncoder {
+    fn drop(&mut self) {
+        // On early error paths (e.g. a GPU failure mid-render) ffmpeg keeps
+        // waiting for frame data and the out file would stay truncated with a
+        // running child. Kill and reap so nothing is left running and the
+        // leftover partial output is unambiguous.
+        let _ = self.child.as_mut().map(|c| c.kill());
+        let _ = self.child.take().map(|mut c| c.wait());
     }
 }
 
