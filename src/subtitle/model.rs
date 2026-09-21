@@ -42,6 +42,12 @@ pub fn resolve_model_path(input: &str) -> Result<PathBuf> {
             )
         })?;
 
+    if model_name == "large" {
+        // Not the full large-v3: a distilled turbo model (better speed, lower
+        // accuracy). Log it so quality expectations match what downloads.
+        log::info!("'large' resolves to ggml-large-v3-turbo (distilled model, faster but slightly lower accuracy than full large-v3)");
+    }
+
     let cache_dir = model_cache_dir()?;
     let cached_path = cache_dir.join(filename);
 
@@ -85,12 +91,28 @@ fn download_model(filename: &str, dest: &Path) -> Result<()> {
         .send()
         .with_context(|| format!("Failed to download model file '{}' from HuggingFace", filename))?;
 
-    // hf-hub downloads to its own cache; copy to our cache location
+    // hf-hub downloads to its own cache; copy to our cache location.
+    //
+    // The copy must be atomic: a process kill mid-copy (`std::fs::copy`
+    // directly onto the destination) previously left a truncated model that
+    // `cached_path.exists()` then trusts forever, with no way to recover
+    // besides manually deleting the cache.
     if downloaded != dest {
-        std::fs::copy(&downloaded, dest).with_context(|| {
+        let tmp_path = dest.with_extension(format!(
+            "{}.part",
+            dest.extension().unwrap_or_default().to_string_lossy()
+        ));
+        std::fs::copy(&downloaded, &tmp_path).with_context(|| {
             format!(
                 "Failed to copy model from {} to {}",
                 downloaded.display(),
+                tmp_path.display()
+            )
+        })?;
+        std::fs::rename(&tmp_path, dest).with_context(|| {
+            format!(
+                "Failed to finalize model file {} -> {}",
+                tmp_path.display(),
                 dest.display()
             )
         })?;
