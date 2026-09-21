@@ -385,7 +385,7 @@ fn main() -> Result<()> {
 
     // 4. Initialize GPU
     log::info!("Initializing GPU...");
-    let gpu = GpuContext::new()?;
+    let gpu = GpuContext::new(cli.backend.as_deref())?;
     let mut frame_renderer = FrameRenderer::new(&gpu, cli.width, cli.height);
 
     // 5. Create shared GPU buffers

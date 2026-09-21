@@ -7,13 +7,42 @@ pub struct GpuContext {
 }
 
 impl GpuContext {
-    pub fn new() -> Result<Self> {
-        pollster::block_on(Self::init_async())
+    /// Default backend priority: platform-native rasterizers that render
+    /// headless reliably (Metal on macOS, Vulkan/DX12 elsewhere).
+    const DEFAULT_BACKENDS: wgpu::Backends =
+        wgpu::Backends::METAL.union(wgpu::Backends::VULKAN).union(wgpu::Backends::DX12);
+
+    pub fn new(backend: Option<&str>) -> Result<Self> {
+        pollster::block_on(Self::init_async(backend))
     }
 
-    async fn init_async() -> Result<Self> {
+    fn parse_backends(spec: &str) -> Result<wgpu::Backends> {
+        let mode = spec.to_ascii_lowercase();
+        let backends = match mode.as_str() {
+            "" => Self::DEFAULT_BACKENDS,
+            "auto" => Self::DEFAULT_BACKENDS,
+            "metal" => wgpu::Backends::METAL,
+            "vulkan" => wgpu::Backends::VULKAN,
+            "dx12" => wgpu::Backends::DX12,
+            "gl" => wgpu::Backends::GL,
+            "webgpu" => wgpu::Backends::BROWSER_WEBGPU,
+            other => {
+                anyhow::bail!(
+                    "Unknown --backend '{other}'. Valid: auto, metal, vulkan, dx12, gl, webgpu"
+                )
+            }
+        };
+
+        Ok(backends)
+    }
+
+    async fn init_async(backend: Option<&str>) -> Result<Self> {
+        let backend_spec = backend.unwrap_or("auto");
+        let backends = Self::parse_backends(backend_spec)
+            .with_context(|| format!("Invalid GPU backend '{}'", backend_spec))?;
+
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::METAL | wgpu::Backends::VULKAN | wgpu::Backends::DX12,
+            backends,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
         });
 
@@ -25,10 +54,14 @@ impl GpuContext {
                 apply_limit_buckets: false,
             })
             .await
-            .context("Failed to find a suitable GPU adapter")?;
+            .with_context(|| {
+                format!(
+                    "No GPU adapter for --backend '{backend_spec}'. Try 'auto' or another backend."
+                )
+            })?;
 
-        log::info!("Using GPU: {}", adapter.get_info().name);
-        log::info!("Backend: {:?}", adapter.get_info().backend);
+        let info = adapter.get_info();
+        log::info!("Using GPU: {} ({:?})", info.name, info.backend);
 
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
@@ -41,5 +74,22 @@ impl GpuContext {
             .context("Failed to create GPU device")?;
 
         Ok(Self { device, queue })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backend_parsing_is_strict() {
+        assert_eq!(
+            GpuContext::parse_backends("auto").unwrap(),
+            GpuContext::DEFAULT_BACKENDS
+        );
+        assert_eq!(GpuContext::parse_backends("Metal").unwrap(), wgpu::Backends::METAL);
+        assert_eq!(GpuContext::parse_backends("").unwrap(), GpuContext::DEFAULT_BACKENDS);
+        assert_eq!(GpuContext::parse_backends("gl").unwrap(), wgpu::Backends::GL);
+        assert!(GpuContext::parse_backends("cuda").is_err());
     }
 }

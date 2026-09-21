@@ -13,7 +13,7 @@ EXAMPLES:
   sonica track.wav -t circular_spectrum --effects crt
 
   # Dial an effect's intensity per effect (or for a whole preset)
-  sonica track.wav --effects "crt:0.6,bloom"
+  sonica track.wav --effects \"crt:0.6,bloom\"
 
   # Strip the template's default effects
   sonica track.wav -t kaleidoscope --effects none
@@ -86,6 +86,10 @@ pub struct Cli {
     /// Frames per second
     #[arg(long, default_value_t = 30, help_heading = "Visuals")]
     pub fps: u32,
+
+    /// Force a GPU backend: auto, metal, vulkan, dx12, gl, webgpu
+    #[arg(long, value_name = "BACKEND", help_heading = "Visuals")]
+    pub backend: Option<String>,
 
     // ------------------------------------------------------ Output & encoding
     /// Output video file
