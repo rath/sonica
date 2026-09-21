@@ -5,6 +5,7 @@ use std::{
     borrow::Cow,
     cell::RefCell,
     collections::HashMap,
+    time::Duration,
     io::{Cursor, Read},
     fs,
     path::{Path, PathBuf},
@@ -428,8 +429,21 @@ pub fn load_font_from_url(url: &str) -> Result<Vec<u8>> {
     }
 }
 
+/// Fonts are sampled at ≥ tens of MB, so anything sampled "bigger" is either
+/// garbage or a request loop; refuse to buffer it (default: 100MB).
+const MAX_FONT_DOWNLOAD_BYTES: u64 = 100 * 1024 * 1024;
+/// Remote font fetches happen on the render thread; a stalled connection
+/// must not wedge the render for minutes.
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30);
+
 fn download_url_bytes(url: &str) -> Result<(Vec<u8>, Option<String>)> {
-    let resp = reqwest::blocking::get(url)
+    let client = reqwest::blocking::Client::builder()
+        .timeout(DOWNLOAD_TIMEOUT)
+        .build()
+        .context("Failed to create HTTP client for font download")?;
+    let resp = client
+        .get(url)
+        .send()
         .with_context(|| format!("Request failed for {url}"))?;
 
     if !resp.status().is_success() {
@@ -442,7 +456,33 @@ fn download_url_bytes(url: &str) -> Result<(Vec<u8>, Option<String>)> {
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
 
-    let bytes = resp.bytes()?.to_vec();
+    // Refuse up front on a server-declared size, then stream with the cap
+    // still enforced on the length actually received — a length-omitting or
+    // lying server cannot balloon resident memory before the download ends.
+    if let Some(len) = resp.content_length() {
+        if len > MAX_FONT_DOWNLOAD_BYTES {
+            anyhow::bail!(
+                "Font resource at {url} is {} bytes, exceeding the {}MB limit",
+                len,
+                MAX_FONT_DOWNLOAD_BYTES / (1024 * 1024)
+            );
+        }
+    }
+
+    let mut bytes: Vec<u8> = Vec::new();
+    // io::Read::take bounds how much this server can push into memory; one
+    // extra byte turns oversize responses into a definite rejection.
+    std::io::Read::take(resp, MAX_FONT_DOWNLOAD_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .with_context(|| format!("Failed to read body from {url}"))?;
+
+    if bytes.len() as u64 > MAX_FONT_DOWNLOAD_BYTES {
+        anyhow::bail!(
+            "Font resource at {url} exceeds the {}MB limit",
+            MAX_FONT_DOWNLOAD_BYTES / (1024 * 1024)
+        );
+    }
+
     Ok((bytes, content_type))
 }
 
