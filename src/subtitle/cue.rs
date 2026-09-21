@@ -14,9 +14,27 @@ pub struct SubtitleCue {
     pub words: Vec<TimedWord>,
 }
 
+/// Tuning thresholds for cue grouping and merging, exposed through the CLI.
+#[derive(Clone, Copy, Debug)]
+pub struct CueTiming {
+    /// Break the current cue when silence between spoken words exceeds this.
+    pub break_gap: f32,
+    /// Extend instead of absorb-merge cues shorter than this.
+    pub min_duration: f32,
+}
+
+impl Default for CueTiming {
+    fn default() -> Self {
+        Self {
+            break_gap: 0.5,
+            min_duration: 0.8,
+        }
+    }
+}
+
 /// Group word-level segments into subtitle cues based on timing gaps,
 /// punctuation boundaries, and maximum character count.
-pub fn group_words(words: Vec<TimedWord>, max_chars: usize) -> Vec<SubtitleCue> {
+pub fn group_words(words: Vec<TimedWord>, max_chars: usize, timing: CueTiming) -> Vec<SubtitleCue> {
     if words.is_empty() {
         return Vec::new();
     }
@@ -36,7 +54,7 @@ pub fn group_words(words: Vec<TimedWord>, max_chars: usize) -> Vec<SubtitleCue> 
 
         let timing_gap = word.start_time - current_end;
         let should_break = !current_text.is_empty()
-            && (timing_gap > 0.5
+            && (timing_gap > timing.break_gap
                 || would_be > max_chars
                 || ends_with_sentence_punct(&current_text));
 
@@ -74,7 +92,7 @@ pub fn group_words(words: Vec<TimedWord>, max_chars: usize) -> Vec<SubtitleCue> 
     }
 
     // Merge short cues (<800ms) with the next cue
-    merge_short_cues(&mut cues, 0.8);
+    merge_short_cues(&mut cues, timing);
 
     cues
 }
@@ -89,19 +107,33 @@ fn ends_with_sentence_punct(text: &str) -> bool {
         || trimmed.ends_with('！')
 }
 
-fn merge_short_cues(cues: &mut Vec<SubtitleCue>, min_duration: f32) {
+fn merge_short_cues(cues: &mut Vec<SubtitleCue>, timing: CueTiming) {
     let mut i = 0;
     while i + 1 < cues.len() {
         let duration = cues[i].end_time - cues[i].start_time;
-        if duration < min_duration {
+        if duration >= timing.min_duration {
+            i += 1;
+            continue;
+        }
+
+        let next_start = cues[i + 1].start_time;
+        let absorbed_gap = next_start - cues[i].end_time;
+        if absorbed_gap > timing.break_gap {
+            // The next cue is conversationally distant: absorbing it would
+            // display one long cue across the silence and reveal its text
+            // seconds early. Extend this short cue instead, without running
+            // into the next cue's start.
+            let extended = (cues[i].start_time + timing.min_duration).max(cues[i].end_time);
+            cues[i].end_time = extended.min(next_start).max(cues[i].end_time);
+            i += 1;
+        } else {
+            // Absorb the neighbor into the short cue and re-check the result.
             let next = cues.remove(i + 1);
             cues[i].text.push(' ');
-            cues[i].text.push_str(&next.text);
+            cues[i].text.push_str(next.text.trim_start());
             cues[i].end_time = next.end_time;
             cues[i].words.extend(next.words);
             // Don't increment i — re-check the merged cue
-        } else {
-            i += 1;
         }
     }
 }
@@ -128,7 +160,7 @@ mod tests {
             word("a", 1.8, 1.9),
             word("test", 1.9, 2.5),
         ];
-        let cues = group_words(words, 12);
+        let cues = group_words(words, 12, CueTiming::default());
         assert!(cues.len() >= 2);
         for cue in &cues {
             assert!(!cue.text.is_empty());
@@ -144,7 +176,7 @@ mod tests {
             word("손상되었기", 2.0, 3.0),
         ];
 
-        let cues = group_words(words, 13);
+        let cues = group_words(words, 13, CueTiming::default());
 
         assert_eq!(cues.len(), 2);
         assert_eq!(cues[0].text, "암세포는 미토콘드리아가");
@@ -164,7 +196,7 @@ mod tests {
             word("New", 2.0, 2.5), // 1.0s gap
             word("sentence", 2.5, 3.0),
         ];
-        let cues = group_words(words, 100);
+        let cues = group_words(words, 100, CueTiming::default());
         assert_eq!(cues.len(), 2);
         assert_eq!(cues[0].text, "Hello world.");
         assert_eq!(cues[0].words.len(), 2);
@@ -178,7 +210,7 @@ mod tests {
             word("Hello.", 0.0, 1.5),
             word("World", 1.5, 3.0),
         ];
-        let cues = group_words(words, 100);
+        let cues = group_words(words, 100, CueTiming::default());
         assert_eq!(cues.len(), 2);
         assert_eq!(cues[0].text, "Hello.");
         assert_eq!(cues[1].text, "World");
@@ -190,7 +222,7 @@ mod tests {
             word("Hi", 0.0, 0.3), // very short
             word("there", 0.3, 1.0),
         ];
-        let cues = group_words(words, 100);
+        let cues = group_words(words, 100, CueTiming::default());
         assert_eq!(cues.len(), 1);
         assert_eq!(cues[0].text, "Hi there");
         assert_eq!(cues[0].words.len(), 2);
@@ -198,7 +230,7 @@ mod tests {
 
     #[test]
     fn empty_input() {
-        let cues = group_words(vec![], 42);
+        let cues = group_words(vec![], 42, CueTiming::default());
         assert!(cues.is_empty());
     }
 
@@ -209,11 +241,69 @@ mod tests {
             word("two", 0.6, 1.0),
             word("three", 1.1, 1.8),
         ];
-        let cues = group_words(words, 100);
+        let cues = group_words(words, 100, CueTiming::default());
         assert_eq!(cues.len(), 1);
         assert_eq!(cues[0].words.len(), 3);
         assert_eq!(cues[0].words[0].text, "one");
         assert_eq!(cues[0].words[1].start_time, 0.6);
         assert_eq!(cues[0].words[2].text, "three");
+    }
+
+    #[test]
+    fn merges_short_cues_that_are_adjacent() {
+        // Punctuation breaks "Yes." into its own (too short) cue, so the
+        // merge path must absorb the adjacent continuation.
+        let words = vec![
+            word("Yes.", 0.0, 0.4),
+            word("really", 0.6, 1.0),
+        ];
+        let cues = group_words(words, 100, CueTiming::default());
+        assert_eq!(cues.len(), 1);
+        assert_eq!(cues[0].text, "Yes. really");
+    }
+
+    #[test]
+    fn extends_short_cue_far_from_next_instead_of_absorbing_it() {
+        let words = vec![
+            word("Okay.", 0.0, 0.4),
+            word("Later", 6.0, 7.0),
+            word("sentence", 7.0, 8.0),
+        ];
+
+        let cues = group_words(words, 100, CueTiming::default());
+
+        assert_eq!(cues.len(), 2);
+        assert_eq!(cues[0].text, "Okay.");
+        // Extended to min_duration, never into the next sentence's slot.
+        assert!((cues[0].end_time - 0.8).abs() < 1e-4, "end={}", cues[0].end_time);
+        assert!(cues[0].end_time <= cues[1].start_time);
+        assert_eq!(cues[1].text, "Later sentence");
+    }
+
+    #[test]
+    fn extended_short_cue_never_overlaps_an_immediate_next_cue() {
+        let words = vec![
+            word("Okay.", 0.0, 0.4),
+            word("Next", 0.6, 1.6),
+        ];
+
+        let cues = group_words(words, 100, CueTiming::default());
+
+        // The 0.2s gap is <= break_gap so the neighbor is absorbed.
+        assert_eq!(cues.len(), 1);
+        assert_eq!(cues[0].text, "Okay. Next");
+    }
+
+    #[test]
+    fn custom_thresholds_are_honored() {
+        // break_gap raised so the 0.6s gap no longer breaks the cue.
+        let timing = CueTiming { break_gap: 1.0, min_duration: 0.8 };
+        let words = vec![
+            word("Hi", 0.0, 0.5),
+            word("again", 1.1, 1.5),
+        ];
+        let cues = group_words(words, 100, timing);
+        assert_eq!(cues.len(), 1);
+        assert_eq!(cues[0].text, "Hi again");
     }
 }

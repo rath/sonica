@@ -80,6 +80,10 @@ pub struct SubtitleConfig {
     pub font_size: f32,
     #[serde(default = "default_subtitle_max_chars")]
     pub max_chars_per_line: usize,
+    #[serde(default = "default_subtitle_gap")]
+    pub gap: f32,
+    #[serde(default = "default_subtitle_min_duration")]
+    pub min_duration: f32,
     pub font: Option<PathBuf>,
     pub font_url: Option<String>,
     pub font_family: Option<String>,
@@ -108,6 +112,8 @@ impl Default for SubtitleConfig {
             language: None,
             font_size: default_subtitle_font_size(),
             max_chars_per_line: default_subtitle_max_chars(),
+            gap: default_subtitle_gap(),
+            min_duration: default_subtitle_min_duration(),
             font: None,
             font_url: None,
             font_family: None,
@@ -126,6 +132,8 @@ impl Default for SubtitleConfig {
 fn default_whisper_model() -> String { "base".into() }
 fn default_subtitle_font_size() -> f32 { 48.0 }
 fn default_subtitle_max_chars() -> usize { 42 }
+fn default_subtitle_gap() -> f32 { 0.5 }
+fn default_subtitle_min_duration() -> f32 { 0.8 }
 fn default_subtitle_background_opacity() -> f32 { 0.55 }
 fn default_subtitle_dim_opacity() -> f32 { 0.75 }
 fn default_subtitle_text_color() -> String { "#FFFFFF".into() }

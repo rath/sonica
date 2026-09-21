@@ -173,6 +173,12 @@ fn main() -> Result<()> {
         if !from_command_line(&matches, "subtitle_max_chars") {
             cli.subtitle_max_chars = cfg.subtitle.max_chars_per_line;
         }
+        if !from_command_line(&matches, "subtitle_gap") {
+            cli.subtitle_gap = cfg.subtitle.gap;
+        }
+        if !from_command_line(&matches, "subtitle_min_duration") {
+            cli.subtitle_min_duration = cfg.subtitle.min_duration;
+        }
         if !from_command_line(&matches, "subtitle_font") {
             cli.subtitle_font = cfg.subtitle.font;
         }
@@ -309,7 +315,11 @@ fn main() -> Result<()> {
         for (i, w) in words.iter().enumerate() {
             log::info!("  [{:3}] {:.2}s - {:.2}s  {:?}", i, w.start_time, w.end_time, w.text);
         }
-        let cues = subtitle::cue::group_words(words, cli.subtitle_max_chars);
+        let cue_timing = subtitle::cue::CueTiming {
+            break_gap: cli.subtitle_gap,
+            min_duration: cli.subtitle_min_duration,
+        };
+        let cues = subtitle::cue::group_words(words, cli.subtitle_max_chars, cue_timing);
         log::info!("Grouped into {} subtitle cues:", cues.len());
         for (i, c) in cues.iter().enumerate() {
             log::info!("  [{:3}] {:.2}s - {:.2}s  {:?}", i, c.start_time, c.end_time, c.text);

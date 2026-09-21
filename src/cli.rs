@@ -179,6 +179,14 @@ pub struct Cli {
     #[arg(long, default_value_t = 42, help_heading = "Subtitles")]
     pub subtitle_max_chars: usize,
 
+    /// Silence (seconds) that splits speech into separate subtitle cues
+    #[arg(long, default_value_t = 0.5, help_heading = "Subtitles")]
+    pub subtitle_gap: f32,
+
+    /// Short cue minimum duration (seconds); short cues are extended or absorbed
+    #[arg(long, default_value_t = 0.8, help_heading = "Subtitles")]
+    pub subtitle_min_duration: f32,
+
     /// Subtitle background opacity (0.0-1.0)
     #[arg(long, default_value_t = 0.55, help_heading = "Subtitles")]
     pub subtitle_background_opacity: f32,
@@ -272,6 +280,14 @@ pub fn validate(cli: &Cli) -> Result<()> {
     }
     if cli.subtitle_max_chars == 0 {
         anyhow::bail!("--subtitle-max-chars must be at least 1 character per line");
+    }
+    for (label, value) in [
+        ("--subtitle-gap", cli.subtitle_gap),
+        ("--subtitle-min-duration", cli.subtitle_min_duration),
+    ] {
+        if !(0.0..=10.0).contains(&value) {
+            anyhow::bail!("{label} must be within 0.0-10.0 seconds, got {value}");
+        }
     }
     Ok(())
 }

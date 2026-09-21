@@ -217,6 +217,8 @@ Options:
       --subtitle-font-url <URL>  Font URL used only for subtitles
       --subtitle-font-family <NAME>  Installed font family used only for subtitles
       --subtitle-max-chars <N>   Max characters per subtitle line [default: 42]
+      --subtitle-gap <S>     Silence (seconds) that splits speech into cues [default: 0.5]
+      --subtitle-min-duration <S>  Short cue minimum duration (seconds) [default: 0.8]
       --subtitle-background-opacity <N>  Background opacity [default: 0.55]
       --subtitle-dim-opacity <N>  Upcoming karaoke text opacity [default: 0.75]
       --subtitle-text-color <HEX> Subtitle text color [default: #FFFFFF]
