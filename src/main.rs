@@ -576,9 +576,11 @@ fn main() -> Result<()> {
             // Requires output buffer binding and workgroup size configuration
         }
 
-        // Render
+        // Render. With post-processing, skip reading the template pass result
+        // back to the CPU — only the post-processed texture is read back, and
+        // all GPU work since the last readback is drained by that one wait.
         let mut pixels = if pp_chain.has_effects() {
-            frame_renderer.render_and_readback(&gpu, &slot.pipeline.pipeline, &slot.bind_group)?;
+            frame_renderer.render(&gpu, &slot.pipeline.pipeline, &slot.bind_group)?;
             let final_texture = pp_chain.run(
                 &gpu.device,
                 &gpu.queue,

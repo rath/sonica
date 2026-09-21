@@ -56,12 +56,16 @@ impl FrameRenderer {
         }
     }
 
-    pub fn render_and_readback(
+    /// Render the template into `render_texture` without reading it back.
+    ///
+    /// Reading this texture out would be wasted work when post-processing is
+    /// enabled, because only the post-processed result is read back.
+    pub fn render(
         &self,
         gpu: &GpuContext,
         pipeline: &wgpu::RenderPipeline,
         bind_group: &wgpu::BindGroup,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<()> {
         let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("frame_encoder"),
         });
@@ -89,53 +93,19 @@ impl FrameRenderer {
             render_pass.draw(0..3, 0..1); // fullscreen triangle
         }
 
-        encoder.copy_texture_to_buffer(
-            wgpu::TexelCopyTextureInfo {
-                texture: &self.render_texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            wgpu::TexelCopyBufferInfo {
-                buffer: &self.output_buffer,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(self.padded_bytes_per_row),
-                    rows_per_image: Some(self.height),
-                },
-            },
-            wgpu::Extent3d {
-                width: self.width,
-                height: self.height,
-                depth_or_array_layers: 1,
-            },
-        );
-
         gpu.queue.submit(std::iter::once(encoder.finish()));
+        Ok(())
+    }
 
-        // Read back
-        let buffer_slice = self.output_buffer.slice(..);
-        let (sender, receiver) = std::sync::mpsc::channel();
-        buffer_slice.map_async(wgpu::MapMode::Read, move |result| {
-            sender.send(result).unwrap();
-        });
-        gpu.device.poll(wgpu::PollType::wait_indefinitely())?;
-        receiver.recv()??;
-
-        let data = buffer_slice.get_mapped_range()?;
-
-        // Strip row padding
-        let mut pixels = Vec::with_capacity((self.unpadded_bytes_per_row * self.height) as usize);
-        for row in 0..self.height {
-            let start = (row * self.padded_bytes_per_row) as usize;
-            let end = start + self.unpadded_bytes_per_row as usize;
-            pixels.extend_from_slice(&data[start..end]);
-        }
-
-        drop(data);
-        self.output_buffer.unmap();
-
-        Ok(pixels)
+    /// Render the template and read the result back from `render_texture`.
+    pub fn render_and_readback(
+        &self,
+        gpu: &GpuContext,
+        pipeline: &wgpu::RenderPipeline,
+        bind_group: &wgpu::BindGroup,
+    ) -> Result<Vec<u8>> {
+        self.render(gpu, pipeline, bind_group)?;
+        self.readback_texture(gpu, &self.render_texture)
     }
 
     /// Read back pixels from an arbitrary texture (e.g. post-processing output)
@@ -144,6 +114,23 @@ impl FrameRenderer {
         gpu: &GpuContext,
         texture: &wgpu::Texture,
     ) -> Result<Vec<u8>> {
+        // wgpu validation errors on a size/format mismatch surface as panics far
+        // from the cause, so reject it here with a descriptive error instead.
+        if texture.width() != self.width
+            || texture.height() != self.height
+            || texture.format() != TEXTURE_FORMAT
+        {
+            anyhow::bail!(
+                "readback_texture: texture is {}x{} {:?}, but the frame renderer expects {}x{} {:?}",
+                texture.width(),
+                texture.height(),
+                texture.format(),
+                self.width,
+                self.height,
+                TEXTURE_FORMAT
+            );
+        }
+
         let mut encoder = gpu.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("readback_encoder"),
         });
