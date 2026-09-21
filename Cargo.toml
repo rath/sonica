@@ -2,6 +2,11 @@
 name = "sonica"
 version = "0.1.0"
 edition = "2021"
+description = "GPU-accelerated audio visualizer: renders MP4 videos from audio files with wgpu"
+license = "MIT"
+repository = "https://github.com/rath/sonica"
+keywords = ["audio", "visualizer", "gpu", "wgpu", "video"]
+categories = ["multimedia::audio", "multimedia::video", "graphics"]
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
