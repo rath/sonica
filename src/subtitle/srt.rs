@@ -17,55 +17,93 @@ pub fn write_srt(path: &Path, cues: &[SubtitleCue]) -> Result<()> {
 
 fn parse_srt(content: &str) -> Result<Vec<SubtitleCue>> {
     let normalized = content.trim_start_matches('\u{feff}').replace("\r\n", "\n");
-    let mut cues = Vec::new();
+    let lines: Vec<&str> = normalized.split('\n').collect();
 
-    for block in normalized.split("\n\n") {
-        let lines = block
-            .lines()
-            .map(str::trim_end)
-            .filter(|line| !line.is_empty())
-            .collect::<Vec<_>>();
-        if lines.is_empty() {
+    // Line-based scan: a cue starts at a timestamp line ("-->") and its text
+    // continues until a blank line, another timestamp line, or the end of file.
+    // This is more forgiving than the old `split("\n\n")`, whose hand-edited
+    // files (where a blank line often carries stray spaces) merged the next
+    // cue's index and timing into the previous cue's text.
+    let mut cues = Vec::new();
+    let mut index = 0usize;
+    while index < lines.len() {
+        if !lines[index].contains("-->") {
+            index += 1;
             continue;
         }
 
-        let timing_index = lines
-            .iter()
-            .position(|line| line.contains("-->"))
-            .context("Subtitle cue is missing a timestamp line")?;
-        let timing = lines[timing_index];
-        let (start, end) = timing
-            .split_once("-->")
-            .context("Invalid SRT timestamp separator")?;
-        let start_time = parse_timestamp(start.trim())?;
-        let end_token = end
-            .split_whitespace()
-            .next()
-            .context("Subtitle cue is missing an end timestamp")?;
-        let end_time = parse_timestamp(end_token)?;
-        if end_time < start_time {
-            anyhow::bail!("Subtitle cue ends before it starts: {timing}");
+        let timing = lines[index];
+        index += 1;
+
+        let mut text_lines: Vec<&str> = Vec::new();
+        while index < lines.len() {
+            let line = lines[index];
+            if line.trim().is_empty() || line.contains("-->") {
+                break;
+            }
+            // A lone digit line immediately above the next timestamp line is
+            // that cue's SRT index (hand-edited files sometimes lose the blank
+            // separator between blocks), not caption text.
+            if line.trim().chars().all(|c| c.is_ascii_digit())
+                && lines.get(index + 1).is_some_and(|next| next.contains("-->"))
+            {
+                break;
+            }
+            text_lines.push(line);
+            index += 1;
         }
 
-        let text = lines[timing_index + 1..].join(" ");
-        if text.is_empty() {
-            anyhow::bail!("Subtitle cue at {timing} has no text");
+        match parse_cue(timing, &text_lines) {
+            Ok(cue) => cues.push(cue),
+            Err(err) => {
+                // One malformed block used to fail the whole render; the CLI
+                // advertises a transcribe → hand-edit → render workflow, so
+                // a typo in one cue would otherwise burn down every render.
+                log::warn!("Skipping malformed subtitle block: {err:#}");
+            }
         }
-
-        cues.push(SubtitleCue {
-            text,
-            start_time,
-            end_time,
-            words: Vec::new(),
-        });
     }
 
     if cues.is_empty() {
-        anyhow::bail!("Subtitle file contains no cues");
+        anyhow::bail!("No valid SRT cues found (the file has no complete cue blocks)");
     }
 
     cues.sort_by(|a, b| a.start_time.total_cmp(&b.start_time));
     Ok(cues)
+}
+
+fn parse_cue(timing: &str, text_lines: &[&str]) -> Result<SubtitleCue> {
+    let (start_token, end_token) = timing
+        .split_once("-->")
+        .map(|(start, tail)| (start.trim(), tail))
+        .expect("cue detection only fires on \"-->\" lines");
+    let end = end_token
+        .split_whitespace()
+        .next()
+        .context("subtitle cue is missing an end timestamp")?;
+
+    let start_time = parse_timestamp(start_token)?;
+    let end_time = parse_timestamp(end)?;
+    if end_time < start_time {
+        anyhow::bail!("subtitle cue ends before it starts: {timing}");
+    }
+
+    let text = text_lines
+        .iter()
+        .map(|line| line.trim_end())
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if text.is_empty() {
+        anyhow::bail!("subtitle cue at {timing} has no text");
+    }
+
+    Ok(SubtitleCue {
+        text,
+        start_time,
+        end_time,
+        words: Vec::new(),
+    })
 }
 
 fn format_srt(cues: &[SubtitleCue]) -> String {
@@ -160,6 +198,58 @@ mod tests {
     #[test]
     fn rejects_reversed_timestamps() {
         let input = "1\n00:00:03,000 --> 00:00:02,000\nInvalid\n";
-        assert!(parse_srt(input).is_err());
+        // The reversed-only block is skipped (after a warning), so the file
+        // ends up with no valid cues and parsing fails loudly.
+        let err = parse_srt(input).unwrap_err();
+        assert!(err.to_string().contains("No valid SRT cues"));
+    }
+
+    #[test]
+    fn skips_malformed_blocks_and_keeps_the_rest() {
+        let input = concat!(
+            "1\n00:00:03,000 --> 00:00:02,000\nReversed\n\n",
+            "2\n00:00:04,000 --> 00:00:05,000\nGood\n"
+        );
+
+        let cues = parse_srt(input).unwrap();
+
+        assert_eq!(cues.len(), 1);
+        assert_eq!(cues[0].text, "Good");
+    }
+
+    #[test]
+    fn terminates_blocks_on_whitespace_blank_lines() {
+        let input = concat!(
+            "1\n00:00:01,000 --> 00:00:02,000\nhello\n",
+            "   \n",
+            "2\n00:00:03,000 --> 00:00:04,000\nworld\n"
+        );
+
+        let cues = parse_srt(input).unwrap();
+
+        assert_eq!(cues.len(), 2, "a whitespace-only separator must end a block: {cues:?}");
+        assert_eq!(cues[0].text, "hello");
+        assert_eq!(cues[1].text, "world");
+    }
+
+    #[test]
+    fn recovers_deleted_blank_separator_before_an_index() {
+        // Hand-edited SRT sometimes drops the blank separator; the index line
+        // above the next cue's timestamp still unambiguously ends the block.
+        let input = concat!(
+            "1\n00:00:01,000 --> 00:00:02,000\nhello\n",
+            "2\n00:00:03,000 --> 00:00:04,000\nworld\n"
+        );
+
+        let cues = parse_srt(input).unwrap();
+
+        assert_eq!(cues.len(), 2);
+        assert_eq!(cues[0].text, "hello");
+        assert_eq!(cues[1].text, "world");
+    }
+
+    #[test]
+    fn rejects_file_without_any_cues() {
+        assert!(parse_srt("freeform notes\nno timestamps here\n").is_err());
     }
 }
