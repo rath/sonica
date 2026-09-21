@@ -67,7 +67,6 @@ fn decode_with_symphonia(path: &Path) -> Result<AudioData> {
         .and_then(|params| params.audio())
         .context("Audio track has no codec parameters")?;
 
-    let channels = codec_params.channels.as_ref().map_or(1, |c| c.count());
     let sample_rate = codec_params.sample_rate.context("Unknown sample rate")?;
 
     let mut decoder = symphonia::default::get_codecs()
@@ -77,6 +76,16 @@ fn decode_with_symphonia(path: &Path) -> Result<AudioData> {
     let mut all_samples: Vec<f32> = Vec::new();
     let mut packet_samples: Vec<f32> = Vec::new();
 
+    // Channel metadata is unreliable for some streams (e.g. raw AAC can carry
+    // none), so the authoritative channel count comes from the first
+    // successfully decoded buffer.
+    let mut channels = codec_params.channels.as_ref().map(|c| c.count());
+
+    // A corrupt stream can emit decode errors for every packet; bail out
+    // instead of "successfully" decoding nothing.
+    const MAX_CONSECUTIVE_DECODE_ERRORS: usize = 100;
+    let mut consecutive_decode_errors: usize = 0;
+
     while let Some(packet) = format.next_packet()? {
         if packet.track_id != track_id {
             continue;
@@ -84,27 +93,57 @@ fn decode_with_symphonia(path: &Path) -> Result<AudioData> {
 
         let decoded = match decoder.decode(&packet) {
             Ok(d) => d,
-            Err(symphonia::core::errors::Error::DecodeError(_)) => continue,
+            Err(symphonia::core::errors::Error::DecodeError(_)) => {
+                consecutive_decode_errors += 1;
+                if consecutive_decode_errors > MAX_CONSECUTIVE_DECODE_ERRORS {
+                    anyhow::bail!(
+                        "Exceeded {} consecutive audio decode errors; the file is likely corrupt",
+                        MAX_CONSECUTIVE_DECODE_ERRORS
+                    );
+                }
+                continue;
+            }
             Err(e) => return Err(e.into()),
         };
+        consecutive_decode_errors = 0;
+
+        let channels = channels.get_or_insert_with(|| {
+            let detected = decoded.spec().channels().count();
+            log::info!("Detected {} audio channel(s)", detected);
+            detected
+        });
 
         decoded.copy_to_vec_interleaved(&mut packet_samples);
-
-        // Downmix to mono
-        if channels == 1 {
-            all_samples.extend_from_slice(&packet_samples);
-        } else {
-            for frame_samples in packet_samples.chunks(channels) {
-                let mono: f32 = frame_samples.iter().sum::<f32>() / channels as f32;
-                all_samples.push(mono);
-            }
-        }
+        downmix_to_mono(&mut all_samples, &packet_samples, *channels);
     }
 
-    Ok(AudioData {
-        samples: all_samples,
-        sample_rate,
-    })
+    if all_samples.is_empty() {
+        anyhow::bail!(
+            "No decodable audio frames in {} (probe succeeded, but every packet failed or was empty)",
+            path.display()
+        );
+    }
+    drop(decoder);
+    drop(format);
+
+    Ok(AudioData { samples: all_samples, sample_rate })
+}
+
+/// Downmix interleaved samples to mono, appending to `out`.
+///
+/// A truncated final interleaved frame (fewer than `channels` samples) can
+/// never average correctly, so it is skipped instead of averaged with a short
+/// divisor that skews the peak level.
+fn downmix_to_mono(out: &mut Vec<f32>, interleaved: &[f32], channels: usize) {
+    assert!(channels >= 1, "channel count must be positive");
+    if channels == 1 {
+        out.extend_from_slice(interleaved);
+        return;
+    }
+    for frame_samples in interleaved.chunks_exact(channels) {
+        let mono: f32 = frame_samples.iter().sum::<f32>() / channels as f32;
+        out.push(mono);
+    }
 }
 
 const FFMPEG_FALLBACK_SAMPLE_RATE: u32 = 48_000;
@@ -182,5 +221,30 @@ mod tests {
     #[test]
     fn rejects_truncated_float_stream() {
         assert!(parse_f32le(&[0, 1, 2]).is_err());
+    }
+
+    #[test]
+    fn mono_downmix_appends_as_is() {
+        let mut out = vec![0.5];
+        downmix_to_mono(&mut out, &[0.25, 0.75], 1);
+        assert_eq!(out, vec![0.5, 0.25, 0.75]);
+    }
+
+    #[test]
+    fn stereo_downmix_averages_frames_and_skips_truncated_remainder() {
+        let mut out = Vec::new();
+        // Two full frames plus one lone trailing sample, which is skipped.
+        downmix_to_mono(&mut out, &[0.0, 1.0, 0.5, 0.5, 0.9], 2);
+        let expected: Vec<f32> = vec![0.5, 0.5];
+        assert_eq!(out, expected);
+    }
+
+    #[test]
+    fn downmix_same_ogg_style_interleaving() {
+        // Six-channel audio meaningfully downmixes to the true average of each
+        // interleaved frame.
+        let mut out = Vec::new();
+        downmix_to_mono(&mut out, &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0], 6);
+        assert_eq!(out, vec![0.5]);
     }
 }
