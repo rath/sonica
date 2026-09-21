@@ -3,6 +3,8 @@ use fontdue::{Font, FontSettings, Metrics};
 use log::warn;
 use std::{
     borrow::Cow,
+    cell::RefCell,
+    collections::HashMap,
     io::{Cursor, Read},
     fs,
     path::{Path, PathBuf},
@@ -10,9 +12,18 @@ use std::{
 
 const FONT_DATA: &[u8] = include_bytes!("../../assets/LiberationMono-Regular.ttf");
 
+/// A rasterized glyph: metrics plus its 8-bit coverage bitmap.
+struct RasterizedGlyph {
+    metrics: Metrics,
+    bitmap: Vec<u8>,
+}
+
 pub struct TextOverlay {
     fonts: Vec<Font>,
     font_size: f32,
+    /// `(char -> glyph)` memo; font size is fixed per instance, so a char
+    /// rasterizes identically every time. Fills on first use.
+    glyph_cache: RefCell<HashMap<char, RasterizedGlyph>>,
 }
 
 impl TextOverlay {
@@ -62,7 +73,11 @@ impl TextOverlay {
 
         fonts.push(load_embedded_font());
 
-        Self { fonts, font_size }
+        Self {
+            fonts,
+            font_size,
+            glyph_cache: RefCell::new(HashMap::new()),
+        }
     }
 
     /// Composite text onto an RGBA pixel buffer at the given position.
@@ -296,6 +311,24 @@ impl TextOverlay {
     }
 
     fn rasterize_with_fallback(&self, ch: char) -> (Metrics, Vec<u8>) {
+        // A char rasterizes identically every time at this overlay's fixed
+        // size, and the render loop re-rasterizes the same strings up to a
+        // dozen times per frame (measure + composite + 8 outline stamps), so
+        // memoize and clone from cache (fontdue metrics + bitmap are small).
+        if let Some(cached) = self.glyph_cache.borrow().get(&ch) {
+            return (cached.metrics, cached.bitmap.clone());
+        }
+
+        let raster = self.rasterize_uncached(ch);
+        let cloned = RasterizedGlyph {
+            metrics: raster.0,
+            bitmap: raster.1.clone(),
+        };
+        self.glyph_cache.borrow_mut().insert(ch, cloned);
+        raster
+    }
+
+    fn rasterize_uncached(&self, ch: char) -> (Metrics, Vec<u8>) {
         let mut fallback: Option<(Metrics, Vec<u8>)> = None;
 
         for font in &self.fonts {
