@@ -44,10 +44,14 @@ impl WhisperTranscriber {
         samples: &[f32],
         sample_rate: u32,
     ) -> Result<Vec<TimedWord>> {
-        let samples_16k = if sample_rate != 16000 {
-            resample_to_16k(samples, sample_rate)?
+        // Reuse the caller's samples when already 16 kHz instead of copying an
+        // unnecessary second buffer (typically hundreds of MB for long files).
+        let owned_16k;
+        let samples_16k: &[f32] = if sample_rate != 16000 {
+            owned_16k = resample_to_16k(samples, sample_rate)?;
+            &owned_16k
         } else {
-            samples.to_vec()
+            samples
         };
 
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
@@ -56,6 +60,14 @@ impl WhisperTranscriber {
         params.set_print_progress(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
+
+        // Hallucination guards for backgroundy audio: without conditioning
+        // and with blank/non-speech-token suppression, instrumental tracks
+        // classically caption "Thank you for watching." forever instead of
+        // returning nothing.
+        params.set_no_context(true); // == condition_on_previous_text(false)
+        params.set_suppress_blank(true);
+        params.set_suppress_nst(true);
 
         if let Some(ref lang) = self.language {
             params.set_language(Some(lang));
@@ -67,7 +79,7 @@ impl WhisperTranscriber {
             .map_err(|e| anyhow::anyhow!("Failed to create Whisper state: {}", e))?;
 
         state
-            .full(params, &samples_16k)
+            .full(params, samples_16k)
             .map_err(|e| anyhow::anyhow!("Whisper transcription failed: {}", e))?;
 
         let num_segments = state.full_n_segments();
@@ -98,7 +110,12 @@ impl WhisperTranscriber {
 
                 let bytes = match token.to_bytes() {
                     Ok(b) => b,
-                    Err(_) => continue,
+                    Err(err) => {
+                        // Unconvertible tokens are dropped, but silently — so
+                        // a word/timing mismatch is at least diagnosable.
+                        debug!("Skipping token index {j} that failed to decode: {err:?}");
+                        continue;
+                    }
                 };
 
                 // Empty token bytes — skip
