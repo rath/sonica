@@ -208,6 +208,10 @@ fn main() -> Result<()> {
         }
     }
 
+    // Validate once, after the merge, so config-sourced values get the same
+    // checks as CLI-passed ones.
+    cli::validate(&cli)?;
+
     // List templates mode. Prints the name you pass to -t, not the manifest's
     // display name, which is not a valid value for the flag.
     if cli.list_templates {

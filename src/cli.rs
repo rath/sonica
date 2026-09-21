@@ -1,3 +1,4 @@
+use anyhow::Result;
 use clap::Parser;
 use std::path::PathBuf;
 
@@ -227,4 +228,94 @@ pub struct Cli {
     /// Config file path (defaults to ./sonica.toml if present)
     #[arg(long, value_name = "PATH", help_heading = "Discovery & Config")]
     pub config: Option<PathBuf>,
+}
+
+/// Reject values that would misbehave mid-pipeline instead of producing a
+/// silent failure: zero-sized output panics wgpu, zero fps yields zero frames,
+/// smoothing of 1.0 freezes the EMA (higher would amplify history), and libx264
+/// rejects crf values above 51. Called after the config merge so config-sourced
+/// values go through the same checks.
+pub fn validate(cli: &Cli) -> Result<()> {
+    if cli.width == 0 || cli.height == 0 {
+        anyhow::bail!("--width/--height must be at least 1 pixel, got {}x{}", cli.width, cli.height);
+    }
+    if cli.width > 8192 || cli.height > 8192 {
+        anyhow::bail!(
+            "--width/--height larger than 8192 will exhaust GPU and disk buffers, got {}x{}",
+            cli.width,
+            cli.height
+        );
+    }
+    if cli.fps == 0 {
+        anyhow::bail!("--fps must be at least 1, got 0 (this would render zero frames)");
+    }
+    if cli.fps > 1000 {
+        anyhow::bail!(
+            "--fps values above 1000 are almost certainly a mistake and will exhaust memory; got {}",
+            cli.fps
+        );
+    }
+    if !(0.0..=0.99).contains(&cli.smoothing) {
+        anyhow::bail!(
+            "--smoothing must be in 0.0..=0.99 (1.0 would freeze all motion), got {}",
+            cli.smoothing
+        );
+    }
+    if cli.bitrate.is_none() && cli.crf > 51 {
+        anyhow::bail!(
+            "--crf must be 0-51 (lower is better), got {} -- use --bitrate to cap size by rate instead",
+            cli.crf
+        );
+    }
+    if cli.subtitle_font_size <= 0.0 {
+        anyhow::bail!("--subtitle-font-size must be positive, got {}", cli.subtitle_font_size);
+    }
+    if cli.subtitle_max_chars == 0 {
+        anyhow::bail!("--subtitle-max-chars must be at least 1 character per line");
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::{CommandFactory, FromArgMatches};
+
+    fn cli_from(args: &[&str]) -> Cli {
+        // try_get_matches_from so a malformed test argument surfaces as a
+        // test panic instead of exiting the whole test runner process.
+        let matches = Cli::command().try_get_matches_from(args).unwrap();
+        Cli::from_arg_matches(&matches).unwrap()
+    }
+
+    #[test]
+    fn defaults_pass_validation() {
+        validate(&cli_from(&["sonica", "track.wav"])).unwrap();
+    }
+
+    #[test]
+    fn rejects_zero_dimensions_and_fps() {
+        for bad_args in [
+            vec!["sonica", "track.wav", "--width", "0"],
+            vec!["sonica", "track.wav", "--height", "0"],
+            vec!["sonica", "track.wav", "--fps", "0"],
+        ] {
+            assert!(validate(&cli_from(&bad_args)).is_err(), "should reject {bad_args:?}");
+        }
+    }
+
+    #[test]
+    fn rejects_frozen_smoothing_and_out_of_range_crf() {
+        assert!(validate(&cli_from(&["sonica", "t", "--smoothing", "1.0"])).is_err());
+        assert!(validate(&cli_from(&["sonica", "t", "--smoothing=-0.1"])).is_err());
+        assert!(validate(&cli_from(&["sonica", "t", "--crf", "60"])).is_err());
+        // With --bitrate, crf is ignored and out-of-range values are fine.
+        validate(&cli_from(&["sonica", "t", "--crf", "60", "--bitrate", "5M"])).unwrap();
+    }
+
+    #[test]
+    fn rejects_zero_subtitle_knobs() {
+        assert!(validate(&cli_from(&["sonica", "t", "--subtitle-font-size", "0"])).is_err());
+        assert!(validate(&cli_from(&["sonica", "t", "--subtitle-max-chars", "0"])).is_err());
+    }
 }
