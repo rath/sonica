@@ -27,8 +27,6 @@ pub fn analyze(audio: &AudioData, fps: u32, smoothing: f32) -> Result<(GlobalAna
 }
 
 fn pass1_global(samples: &[f32], sample_rate: u32, duration: f32) -> GlobalAnalysis {
-    let peak_amplitude = samples.iter().map(|s| s.abs()).fold(0.0f32, f32::max);
-
     // RMS in windows
     let window_size = sample_rate as usize / 10; // 100ms windows
     let mut peak_rms = 0.0f32;
@@ -68,7 +66,10 @@ fn pass1_global(samples: &[f32], sample_rate: u32, duration: f32) -> GlobalAnaly
             .map(|(cur, prev)| (cur - prev).max(0.0))
             .sum();
 
-        let time = pos as f32 / sample_rate as f32;
+        // The flux of this window reflects energy over [pos, pos+FFT_SIZE);
+        // stamp its midpoint, not its start, so onsets line up with the
+        // loud part of the attack rather than arriving half a window early.
+        let time = (pos + FFT_SIZE / 2) as f32 / sample_rate as f32;
         flux_values.push((time, flux));
         std::mem::swap(&mut magnitudes, &mut previous_magnitudes);
         pos += HOP_SIZE;
@@ -81,16 +82,13 @@ fn pass1_global(samples: &[f32], sample_rate: u32, duration: f32) -> GlobalAnaly
     let tempo_bpm = estimate_tempo(&beat_times);
 
     log::info!(
-        "Global: peak_rms={:.4}, peak_amp={:.4}, beats={}, tempo={:.1} BPM",
-        peak_rms, peak_amplitude, beat_times.len(), tempo_bpm
+        "Global: peak_rms={:.4}, beats={}, tempo={:.1} BPM",
+        peak_rms, beat_times.len(), tempo_bpm
     );
 
     GlobalAnalysis {
-        sample_rate,
-        total_samples: samples.len(),
         duration,
         peak_rms,
-        peak_amplitude,
         beat_times,
         tempo_bpm,
     }
@@ -151,7 +149,7 @@ fn estimate_tempo(beat_times: &[f32]) -> f32 {
 
     let median_interval = {
         let mut sorted = reasonable.clone();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted.sort_by(f32::total_cmp);
         sorted[sorted.len() / 2]
     };
 
@@ -241,15 +239,26 @@ fn pass2_per_frame(
                 0.0
             };
 
-            // Waveform samples for this frame (downsample to ~512 points)
-            let waveform_len = 512.min(frame_samples.len());
+            // Waveform samples for this frame (downsample to ~512 points).
+            // Min/max alternation keeps the envelope's peaks and troughs that
+            // naive left-in-each-bucket sampling aliases away; the count is
+            // unchanged so shaders need no adjustment.
+            let waveform_len = 512;
             let waveform: Vec<f32> = if frame_samples.is_empty() {
                 vec![0.0; 512]
             } else {
                 (0..waveform_len)
                     .map(|i| {
-                        let idx = i * frame_samples.len() / waveform_len;
-                        frame_samples[idx]
+                        let bucket_start = i * frame_samples.len() / waveform_len;
+                        let bucket_end = ((i + 1) * frame_samples.len() / waveform_len)
+                            .max(bucket_start + 1)
+                            .min(frame_samples.len());
+                        let bucket = &frame_samples[bucket_start..bucket_end];
+                        if i % 2 == 0 {
+                            bucket.iter().copied().fold(f32::MIN, f32::max)
+                        } else {
+                            bucket.iter().copied().fold(f32::MAX, f32::min)
+                        }
                     })
                     .collect()
             };
@@ -265,7 +274,6 @@ fn pass2_per_frame(
                 brilliance,
                 rms,
                 spectral_centroid,
-                spectral_flux: 0.0, // computed in sequential post-pass
                 waveform,
             }
             },

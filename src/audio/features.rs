@@ -14,9 +14,6 @@ pub struct FrameFeatures {
     pub rms: f32,
     /// Spectral centroid (Hz)
     pub spectral_centroid: f32,
-    /// Spectral flux (change from previous frame)
-    #[allow(dead_code)]
-    pub spectral_flux: f32,
     /// Raw waveform samples for this frame
     pub waveform: Vec<f32>,
 }
@@ -50,15 +47,11 @@ pub struct SmoothedFrame {
 
 #[derive(Clone, Debug)]
 pub struct GlobalAnalysis {
-    #[allow(dead_code)]
-    pub sample_rate: u32,
-    #[allow(dead_code)]
-    pub total_samples: usize,
     pub duration: f32,
     pub peak_rms: f32,
-    #[allow(dead_code)]
-    pub peak_amplitude: f32,
     pub beat_times: Vec<f32>,
+    /// Estimated tempo — logged during analysis; kept public so tools
+    /// embedding the pipeline can read it. Not read by the render loop yet.
     #[allow(dead_code)]
     pub tempo_bpm: f32,
 }
