@@ -475,12 +475,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let barrel = 0.15 * pp.intensity;
     let distorted_uv = in.uv + center * dist2 * barrel;
 
-    // Check bounds
-    if distorted_uv.x < 0.0 || distorted_uv.x > 1.0 || distorted_uv.y < 0.0 || distorted_uv.y > 1.0 {
-        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
-    }
-
-    var color = textureSample(input_tex, input_sampler, distorted_uv).rgb;
+    // textureSample must stay in uniform control flow, so the out-of-bounds
+    // early return is a mask: sample always (clamped UV) and black out pixels
+    // whose distorted position left the screen.
+    let inside = f32(
+        distorted_uv.x >= 0.0 && distorted_uv.x <= 1.0
+            && distorted_uv.y >= 0.0 && distorted_uv.y <= 1.0
+    );
+    var color = textureSample(input_tex, input_sampler, clamp(distorted_uv, vec2<f32>(0.0), vec2<f32>(1.0))).rgb;
+    color *= inside;
 
     // Scanlines
     let scanline_freq = pp.resolution.y * 0.5;
@@ -558,5 +561,70 @@ mod tests {
     fn validate_effects_rejects_typos_and_accepts_presets() {
         assert!(validate_effects(&["vignete".to_string()]).is_err());
         assert!(validate_effects(&["vignette".to_string(), "crt".to_string()]).is_ok());
+    }
+
+    /// Full naga validation (uniformity rules, types, addressing) of every
+    /// effect shader, matching what the runtime backends enforce. This used to
+    /// be a runtime failure only: a data-dependent early return feeding
+    /// textureSample is rejected by stricter backends.
+    #[test]
+    fn effect_shaders_pass_strict_wgsl_validation() {
+        let validate = |shader: &str| {
+            let module = naga::front::wgsl::parse_str(shader)
+                .expect("WGSL parsed without syntax errors");
+            naga::valid::Validator::new(
+                naga::valid::ValidationFlags::all(),
+                naga::valid::Capabilities::default(),
+            )
+            .validate(&module)
+            .expect("WGSL module validation passed")
+        };
+
+        for (name, _) in EFFECTS {
+            let shader = get_effect_shader(name).unwrap();
+            validate(&shader);
+        }
+    }
+
+    /// The composed per-effect source builds on a shared header; assert the
+    /// header itself is also valid (guards future refactors of the common VS).
+    #[test]
+    fn common_vertex_block_passes_wgsl_validation() {
+        // A minimal fragment referencing the header's bindings.
+        let fragment = r#"
+@fragment
+fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+    return vec4<f32>(textureSampleLevel(
+        input_tex,
+        input_sampler,
+        in.uv,
+        0.0
+    ).rgb, 1.0);
+}
+"#;
+        let shader = format!("{}{}", common_vertex_header(), fragment);
+        let module =
+            naga::front::wgsl::parse_str(&shader).expect("WGSL parse");
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::default(),
+        )
+        .validate(&module)
+        .expect("valid WGSL");
+    }
+
+    /// The header shared by all effect shaders, surfaced separately so the
+    /// header's vertex block can be validated on its own too.
+    ///
+    /// It is recovered from a known effect's composed source: everything
+    /// before the fragment body's first `@fragment` marker.
+    #[cfg(test)]
+    fn common_vertex_header() -> String {
+        let composed = get_effect_shader("vignette").expect("vignette exists");
+        composed
+            .split("@fragment")
+            .next()
+            .expect("vignette contains a fragment entry point")
+            .to_string()
     }
 }

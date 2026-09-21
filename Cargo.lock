@@ -3215,6 +3215,7 @@ dependencies = [
  "hf-hub",
  "indicatif",
  "log",
+ "naga",
  "pollster",
  "rayon",
  "reqwest",

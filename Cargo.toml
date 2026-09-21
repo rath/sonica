@@ -38,6 +38,11 @@ whisper-rs = { version = "0.16", optional = true }
 default = []
 subtitles = ["dep:whisper-rs", "rubato", "hf-hub"]
 
+[dev-dependencies]
+# Same version as wgpu, so tests can validate WGSL (uniformity rules, types)
+# the same way the runtime backends do.
+naga = "30"
+
 [profile.release]
 opt-level = 3
 lto = "thin"

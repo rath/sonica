@@ -510,3 +510,46 @@ mod tests {
         assert!(format!("{err:#}").contains("not a valid WGSL identifier"));
     }
 }
+
+/// Compiled-time validated: every embedded template's WGSL (and its
+/// `#import` composition with the shared shader) must pass full naga
+/// validation, matching what runtime backends enforce.
+#[test]
+fn embedded_template_shaders_pass_strict_wgsl_validation() {
+    let validate = |shader: &str, name: &str| {
+        let module = naga::front::wgsl::parse_str(shader)
+            .unwrap_or_else(|err| panic!("'{name}' WGSL parse error: {err}"));
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::default(),
+        )
+        .validate(&module)
+        .unwrap_or_else(|err| panic!("'{name}' WGSL validation error: {err}"));
+    };
+
+    validate(
+        embedded::embedded_shared_shader("common.wgsl").unwrap(),
+        "shaders/common.wgsl",
+    );
+
+    for (name, template) in embedded::embedded_templates() {
+        let manifest: super::manifest::TemplateManifest = parse_manifest_json(
+            template.manifest_json,
+        );
+        let shader = inject_params(
+            template.fragment_wgsl,
+            &manifest,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap_or_else(|err| panic!("'{name}' parameter injection failed: {err:#}"));
+        let composed = preprocess_imports(&shader)
+            .unwrap_or_else(|err| panic!("'{name}' import processing failed: {err}"));
+        validate(&composed, name);
+    }
+}
+
+/// Parse a template manifest from its embedded JSON.
+#[cfg(test)]
+fn parse_manifest_json(manifest_json: &str) -> super::manifest::TemplateManifest {
+    serde_json::from_str(manifest_json).expect("embedded template manifest JSON parses")
+}
