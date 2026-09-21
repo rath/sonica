@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use super::embedded;
-use super::manifest::{ParamDef, TemplateManifest};
+use super::manifest::{ParamDef, ParamType, TemplateManifest};
 
 pub struct LoadedTemplate {
     pub manifest: TemplateManifest,
@@ -136,6 +136,13 @@ fn try_load_template_fs(name: &str) -> Result<Option<LoadedTemplate>> {
         .with_context(|| format!("Failed to read manifest: {}", manifest_path.display()))?;
     let manifest: TemplateManifest = serde_json::from_str(&manifest_str)
         .with_context(|| format!("Failed to parse manifest: {}", manifest_path.display()))?;
+    warn_unknown_manifest_keys(
+        &manifest,
+        &template_dir
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+    );
 
     let fragment_path = template_dir.join(&manifest.shaders.fragment);
     let fragment_raw = std::fs::read_to_string(&fragment_path)
@@ -177,6 +184,7 @@ fn load_template_embedded(name: &str) -> Result<LoadedTemplate> {
 
     let manifest: TemplateManifest = serde_json::from_str(tmpl.manifest_json)
         .with_context(|| format!("Failed to parse embedded manifest for '{}'", name))?;
+    warn_unknown_manifest_keys(&manifest, name);
 
     let fragment_shader = preprocess_imports(tmpl.fragment_wgsl)?;
 
@@ -269,8 +277,8 @@ pub fn inject_params(
         let upper_name = name.to_uppercase();
         let value = overrides.get(name.as_str());
 
-        match param_def.param_type.as_str() {
-            "int" => {
+        match param_def.param_type {
+            ParamType::Int => {
                 let v: i64 = match value {
                     Some(v) => v.parse().with_context(|| {
                         format!("Invalid --param {name}={v}: expected an integer")
@@ -286,7 +294,7 @@ pub fn inject_params(
                 }
                 consts.push_str(&format!("const PARAM_{}: i32 = {};\n", upper_name, clamped as i64));
             }
-            "float" => {
+            ParamType::Float => {
                 let v: f64 = match value {
                     Some(v) => v.parse().with_context(|| {
                         format!("Invalid --param {name}={v}: expected a float")
@@ -299,7 +307,7 @@ pub fn inject_params(
                 }
                 consts.push_str(&format!("const PARAM_{}: f32 = {:.6};\n", upper_name, clamped));
             }
-            "bool" => {
+            ParamType::Bool => {
                 let v = match value.map(String::as_str) {
                     Some("true" | "1") => true,
                     Some("false" | "0") => false,
@@ -314,7 +322,7 @@ pub fn inject_params(
                     if v { 1 } else { 0 }
                 ));
             }
-            "color" => {
+            ParamType::Color => {
                 let (r, g, b) = if let Some(v) = value {
                     let parts: Vec<f64> = v
                         .split(':')
@@ -347,12 +355,6 @@ pub fn inject_params(
                 consts.push_str(&format!("const PARAM_{}_G: f32 = {:.6};\n", upper_name, g));
                 consts.push_str(&format!("const PARAM_{}_B: f32 = {:.6};\n", upper_name, b));
             }
-            _ => {
-                anyhow::bail!(
-                    "Template manifest declares unsupported parameter type '{}' for '{name}'",
-                    param_def.param_type
-                );
-            }
         }
     }
 
@@ -380,6 +382,19 @@ fn manifest_clamp(param_def: &ParamDef, value: f64, name: &str) -> f64 {
         );
     }
     clamped
+}
+
+/// Surface manifest keys the schema does not recognize — a typo (`parameter`,
+/// `deafults`) used to fall through silently and was invisible for months.
+fn warn_unknown_manifest_keys(manifest: &TemplateManifest, template: &str) {
+    if !manifest.unknown.is_empty() {
+        let keys: Vec<String> = manifest.unknown.keys().cloned().collect();
+        log::warn!(
+            "Template '{}' manifest has unknown keys (ignored): {}",
+            template,
+            keys.join(", ")
+        );
+    }
 }
 
 fn validate_wgsl_identifier(name: &str) -> Result<()> {
@@ -411,10 +426,17 @@ mod tests {
             parameters: parameters
                 .into_iter()
                 .map(|(name, kind, default)| {
+                    let param_type = match kind {
+                        "int" => ParamType::Int,
+                        "float" => ParamType::Float,
+                        "bool" => ParamType::Bool,
+                        "color" => ParamType::Color,
+                        other => panic!("test helper: unknown param kind '{other}'"),
+                    };
                     (
                         name.to_string(),
                         ParamDef {
-                            param_type: kind.to_string(),
+                            param_type,
                             default,
                             min: None,
                             max: None,
@@ -422,6 +444,7 @@ mod tests {
                     )
                 })
                 .collect(),
+            unknown: HashMap::new(),
         }
     }
 
