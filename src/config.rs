@@ -1,7 +1,9 @@
+use anyhow::Context;
 use serde::Deserialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default)]
     pub output: OutputConfig,
@@ -14,6 +16,7 @@ pub struct Config {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OutputConfig {
     #[serde(default = "default_width")]
     pub width: u32,
@@ -31,6 +34,7 @@ pub struct OutputConfig {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AudioConfig {
     #[serde(default = "default_smoothing")]
     pub smoothing: f32,
@@ -67,6 +71,7 @@ fn default_codec() -> String { "libx264".into() }
 fn default_smoothing() -> f32 { 0.85 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SubtitleConfig {
     #[serde(default = "default_whisper_model")]
     pub whisper_model: String,
@@ -130,7 +135,52 @@ fn default_subtitle_outline_width() -> u32 { 2 }
 fn default_subtitle_margin_bottom() -> f32 { 0.08 }
 fn default_subtitle_karaoke() -> bool { true }
 
-pub fn load_config(path: &PathBuf) -> Option<Config> {
-    let content = std::fs::read_to_string(path).ok()?;
-    toml::from_str(&content).ok()
+/// Load a TOML config, surfacing read and parse errors with the offending path.
+///
+/// A malformed config used to collapse into `None`, silently reverting every
+/// setting to defaults while main logged success — so typos went unnoticed.
+pub fn load_config(path: &Path) -> anyhow::Result<Config> {
+    let content = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read config file {}", path.display()))?;
+    toml::from_str(&content)
+        .with_context(|| format!("Invalid TOML in {}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("sonica-config-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn parses_nested_output_values() {
+        let dir = temp_dir("valid");
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "[output]\nwidth = 1280\nfps = 60\n").unwrap();
+
+        let cfg = load_config(&path).unwrap();
+        assert_eq!(cfg.output.width, 1280);
+        assert_eq!(cfg.output.fps, 60);
+        assert_eq!(cfg.output.height, 1080); // untouched fields keep their default
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn surfaces_unknown_config_keys() {
+        let dir = temp_dir("typo");
+        let path = dir.join("config.toml");
+        std::fs::write(&path, "widht = 1280\n").unwrap();
+
+        let err = load_config(&path).unwrap_err();
+        let message = format!("{err:#}"); // full chain: context + serde cause
+        assert!(message.contains("widht"), "error should name the bad key: {message}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

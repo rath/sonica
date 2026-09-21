@@ -8,7 +8,8 @@ mod encode;
 mod subtitle;
 
 use anyhow::{Context, Result};
-use clap::{CommandFactory, FromArgMatches};
+use clap::parser::ValueSource;
+use clap::{ ArgMatches, CommandFactory, FromArgMatches };
 use indicatif::{ProgressBar, ProgressStyle};
 use std::collections::HashMap;
 
@@ -21,6 +22,12 @@ use render::text::{load_font_from_url, TextOverlay};
 use encode::ffmpeg::FfmpegEncoder;
 use audio::features::SmoothedFrame;
 use templates::loader;
+
+/// True when the user passed the flag on the command line, so a config file
+/// must not override it.
+fn from_command_line(matches: &ArgMatches, key: &str) -> bool {
+    matches.value_source(key) == Some(ValueSource::CommandLine)
+}
 
 /// Template name paired with its manifest description, falling back to an empty
 /// description when a manifest is unreadable (mirrors `--list-templates`).
@@ -88,7 +95,8 @@ fn main() -> Result<()> {
     let command = Cli::command()
         .mut_arg("template", |arg| arg.long_help(template_long_help()))
         .mut_arg("effects", |arg| arg.long_help(effects_long_help()));
-    let mut cli = match Cli::from_arg_matches(&command.get_matches()) {
+    let matches = command.get_matches();
+    let mut cli = match Cli::from_arg_matches(&matches) {
         Ok(cli) => cli,
         Err(err) => err.exit(),
     };
@@ -113,75 +121,90 @@ fn main() -> Result<()> {
         }
         None
     });
+
     if let Some(ref path) = config_path {
-        if let Some(cfg) = config::load_config(path) {
-            log::info!("Loaded config from {}", path.display());
-            // Merge: config values apply only when CLI is at its default
-            if cli.width == 1920 { cli.width = cfg.output.width; }
-            if cli.height == 1080 { cli.height = cfg.output.height; }
-            if cli.fps == 30 { cli.fps = cfg.output.fps; }
-            if cli.crf == 18 { cli.crf = cfg.output.crf; }
-            if cli.codec == "libx264" { cli.codec = cfg.output.codec; }
-            if cli.smoothing == 0.85 { cli.smoothing = cfg.audio.smoothing; }
-            if cli.effects.is_empty() && !cfg.effects.is_empty() {
-                cli.effects = cfg.effects;
-            }
-            if cli.font.is_none() {
-                cli.font = cfg.output.font;
-            }
-            if cli.font_url.is_none() {
-                cli.font_url = cfg.output.font_url;
-            }
-            if cli.font_family.is_none() {
-                cli.font_family = cfg.output.font_family;
-            }
-            if cli.whisper_model == "base" {
-                cli.whisper_model = cfg.subtitle.whisper_model;
-            }
-            if cli.subtitle_lang.is_none() {
-                cli.subtitle_lang = cfg.subtitle.language;
-            }
-            if cli.subtitle_font_size == 48.0 {
-                cli.subtitle_font_size = cfg.subtitle.font_size;
-            }
-            if cli.subtitle_max_chars == 42 {
-                cli.subtitle_max_chars = cfg.subtitle.max_chars_per_line;
-            }
-            if cli.subtitle_font.is_none() {
-                cli.subtitle_font = cfg.subtitle.font;
-            }
-            if cli.subtitle_font_url.is_none() {
-                cli.subtitle_font_url = cfg.subtitle.font_url;
-            }
-            if cli.subtitle_font_family.is_none() {
-                cli.subtitle_font_family = cfg.subtitle.font_family;
-            }
-            if cli.subtitle_background_opacity == 0.55 {
-                cli.subtitle_background_opacity = cfg.subtitle.background_opacity;
-            }
-            if cli.subtitle_dim_opacity == 0.75 {
-                cli.subtitle_dim_opacity = cfg.subtitle.dim_opacity;
-            }
-            if cli.subtitle_text_color == "#FFFFFF" {
-                cli.subtitle_text_color = cfg.subtitle.text_color;
-            }
-            if cli.subtitle_highlight_color == "#FFFFFF" {
-                cli.subtitle_highlight_color = cfg.subtitle.highlight_color;
-            }
-            if cli.subtitle_outline_color == "#000000" {
-                cli.subtitle_outline_color = cfg.subtitle.outline_color;
-            }
-            if cli.subtitle_outline_width == 2 {
-                cli.subtitle_outline_width = cfg.subtitle.outline_width;
-            }
-            if cli.subtitle_margin_bottom == 0.08 {
-                cli.subtitle_margin_bottom = cfg.subtitle.margin_bottom;
-            }
-            if !cli.no_subtitle_karaoke && !cfg.subtitle.karaoke {
-                cli.no_subtitle_karaoke = true;
-            }
-        } else {
-            log::warn!("Failed to load config from {}", path.display());
+        let cfg = config::load_config(path).map_err(|err| {
+            anyhow::anyhow!("Failed to load config from {}: {err:#}", path.display())
+        })?;
+        log::info!("Loaded config from {}", path.display());
+
+        // Config values apply only to flags the user did not pass explicitly;
+        // comparing against hardcoded defaults would override an explicit
+        // `--width 1920` whenever the config sets 1280.
+        if !from_command_line(&matches, "width") {
+            cli.width = cfg.output.width;
+        }
+        if !from_command_line(&matches, "height") {
+            cli.height = cfg.output.height;
+        }
+        if !from_command_line(&matches, "fps") {
+            cli.fps = cfg.output.fps;
+        }
+        if !from_command_line(&matches, "crf") {
+            cli.crf = cfg.output.crf;
+        }
+        if !from_command_line(&matches, "codec") {
+            cli.codec = cfg.output.codec;
+        }
+        if !from_command_line(&matches, "smoothing") {
+            cli.smoothing = cfg.audio.smoothing;
+        }
+        if !from_command_line(&matches, "effects") && !cfg.effects.is_empty() {
+            cli.effects = cfg.effects;
+        }
+        if !from_command_line(&matches, "font") {
+            cli.font = cfg.output.font;
+        }
+        if !from_command_line(&matches, "font_url") {
+            cli.font_url = cfg.output.font_url;
+        }
+        if !from_command_line(&matches, "font_family") {
+            cli.font_family = cfg.output.font_family;
+        }
+        if !from_command_line(&matches, "whisper_model") {
+            cli.whisper_model = cfg.subtitle.whisper_model;
+        }
+        if !from_command_line(&matches, "subtitle_lang") {
+            cli.subtitle_lang = cfg.subtitle.language;
+        }
+        if !from_command_line(&matches, "subtitle_font_size") {
+            cli.subtitle_font_size = cfg.subtitle.font_size;
+        }
+        if !from_command_line(&matches, "subtitle_max_chars") {
+            cli.subtitle_max_chars = cfg.subtitle.max_chars_per_line;
+        }
+        if !from_command_line(&matches, "subtitle_font") {
+            cli.subtitle_font = cfg.subtitle.font;
+        }
+        if !from_command_line(&matches, "subtitle_font_url") {
+            cli.subtitle_font_url = cfg.subtitle.font_url;
+        }
+        if !from_command_line(&matches, "subtitle_font_family") {
+            cli.subtitle_font_family = cfg.subtitle.font_family;
+        }
+        if !from_command_line(&matches, "subtitle_background_opacity") {
+            cli.subtitle_background_opacity = cfg.subtitle.background_opacity;
+        }
+        if !from_command_line(&matches, "subtitle_dim_opacity") {
+            cli.subtitle_dim_opacity = cfg.subtitle.dim_opacity;
+        }
+        if !from_command_line(&matches, "subtitle_text_color") {
+            cli.subtitle_text_color = cfg.subtitle.text_color;
+        }
+        if !from_command_line(&matches, "subtitle_highlight_color") {
+            cli.subtitle_highlight_color = cfg.subtitle.highlight_color;
+        }
+        if !from_command_line(&matches, "subtitle_outline_color") {
+            cli.subtitle_outline_color = cfg.subtitle.outline_color;
+        }
+        if !from_command_line(&matches, "subtitle_outline_width") {
+            cli.subtitle_outline_width = cfg.subtitle.outline_width;
+        }
+        if !from_command_line(&matches, "subtitle_margin_bottom") {
+            cli.subtitle_margin_bottom = cfg.subtitle.margin_bottom;
+        }
+        if !from_command_line(&matches, "no_subtitle_karaoke") && !cfg.subtitle.karaoke {
+            cli.no_subtitle_karaoke = true;
         }
     }
 
